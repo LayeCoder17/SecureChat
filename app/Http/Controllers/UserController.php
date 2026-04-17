@@ -18,10 +18,14 @@ class UserController extends Controller
         $user = $request->user();
         $query = $user->canCommunicateWith();
 
-        $results = $query->where(function ($q) use ($request) {
-            $q->where('name', 'ilike', '%' . $request->q . '%')
-                ->orWhere('email', 'ilike', '%' . $request->q . '%')
-                ->orWhere('poste', 'ilike', '%' . $request->q . '%');
+        $driver = \DB::connection()->getDriverName();
+        $likeOp = $driver === 'pgsql' ? 'ilike' : 'like';
+        $term = '%' . $request->q . '%';
+
+        $results = $query->where(function ($q) use ($term, $likeOp) {
+            $q->where('name', $likeOp, $term)
+                ->orWhere('email', $likeOp, $term)
+                ->orWhere('poste', $likeOp, $term);
         })
             ->limit(20)
             ->get(['id', 'name', 'email', 'avatar', 'status', 'last_seen_at', 'department_id', 'role', 'poste']);
