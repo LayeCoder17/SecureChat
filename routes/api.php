@@ -9,6 +9,7 @@ use App\Http\Controllers\ChannelController;
 use App\Http\Controllers\AttachmentController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\AdminController;
+use App\Http\Controllers\NotificationController;
 
 // Routes publiques
 Route::post('/auth/register', [AuthController::class, 'register']);
@@ -53,6 +54,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/user/password', [UserController::class, 'updatePassword']);
     Route::post('/user/heartbeat', [UserController::class, 'heartbeat']);
     Route::get('/users/online', [UserController::class, 'onlineUsers']);
+
+    // Notifications
+    Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
+    Route::post('/notifications/{notification}/read', [NotificationController::class, 'markAsRead']);
+    Route::post('/notifications/read-all', [NotificationController::class, 'markAllRead']);
+    Route::delete('/notifications/{notification}', [NotificationController::class, 'destroy']);
     Route::get('/users/{user}', [UserController::class, 'show']);
 
     // Conversations
