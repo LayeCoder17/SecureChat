@@ -37,22 +37,29 @@ FROM php:8.3-fpm-alpine AS app
 
 WORKDIR /var/www/html
 
-# Dépendances système + extensions PHP
-RUN apk add --no-cache \
+# Dépendances système (persistantes) + build deps (temporaires)
+RUN set -eux; \
+    apk add --no-cache \
         bash \
         curl \
         git \
-        icu-dev \
-        libpng-dev \
-        libzip-dev \
-        oniguruma-dev \
-        mysql-client \
+        mariadb-client \
+        libpng \
+        libzip \
+        icu-libs \
+        oniguruma \
         shadow \
         su-exec \
         supervisor \
         unzip \
-        zip \
-    && docker-php-ext-install \
+        zip; \
+    apk add --no-cache --virtual .build-deps \
+        $PHPIZE_DEPS \
+        icu-dev \
+        libpng-dev \
+        libzip-dev \
+        oniguruma-dev; \
+    docker-php-ext-install -j"$(nproc)" \
         bcmath \
         exif \
         gd \
@@ -60,15 +67,11 @@ RUN apk add --no-cache \
         mbstring \
         pcntl \
         pdo_mysql \
-        zip \
-    && pecl install redis \
-    && docker-php-ext-enable redis \
-    && apk del --no-network --purge \
-        icu-dev \
-        libpng-dev \
-        libzip-dev \
-        oniguruma-dev \
-    && rm -rf /var/cache/apk/*
+        zip; \
+    pecl install redis; \
+    docker-php-ext-enable redis; \
+    apk del --no-network --purge .build-deps; \
+    rm -rf /var/cache/apk/* /tmp/*
 
 # Configuration PHP pour la prod (memory, upload)
 COPY docker/php/php.ini /usr/local/etc/php/conf.d/zz-app.ini
