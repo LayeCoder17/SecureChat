@@ -88,6 +88,16 @@ class DepartmentSeeder extends Seeder
         }
 
         // ── Utilisateurs ──
+        // Super Admin (accès total à l'espace d'administration)
+        User::create([
+            'name' => 'Super Admin',
+            'email' => 'admin@securechat.com',
+            'password' => Hash::make('admin12345'),
+            'department_id' => $dg->id,
+            'role' => 'admin',
+            'poste' => 'Administrateur Système',
+        ]);
+
         User::create([
             'name' => 'Amadou Diallo',
             'email' => 'pdg@securechat.com',

@@ -1,40 +1,32 @@
 import '../css/app.css';
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Chat from './pages/Chat';
-import { applyTheme, getPreferredTheme, THEME_STORAGE_KEY } from './theme';
+import Admin from './pages/Admin';
+import { ThemeProvider } from './theme';
 
 function App() {
     const token = localStorage.getItem('token');
-    const [theme, setTheme] = useState('dark');
-
-    useEffect(() => {
-        const initial = getPreferredTheme();
-        setTheme(initial);
-        applyTheme(initial);
-    }, []);
-
-    const toggleTheme = () => {
-        const next = theme === 'dark' ? 'light' : 'dark';
-        setTheme(next);
-        applyTheme(next);
-        localStorage.setItem(THEME_STORAGE_KEY, next);
-    };
+    const user = JSON.parse(localStorage.getItem('user') || 'null');
+    const isAdmin = user?.role === 'admin';
 
     return (
         <Routes>
-            <Route path="/login" element={token ? <Navigate to="/" /> : <Login theme={theme} onToggleTheme={toggleTheme} />} />
-            <Route path="/register" element={token ? <Navigate to="/" /> : <Register theme={theme} onToggleTheme={toggleTheme} />} />
-            <Route path="/*" element={token ? <Chat theme={theme} onToggleTheme={toggleTheme} /> : <Navigate to="/login" />} />
+            <Route path="/login" element={token ? <Navigate to={isAdmin ? '/admin' : '/'} /> : <Login />} />
+            <Route path="/register" element={token ? <Navigate to="/" /> : <Register />} />
+            <Route path="/admin" element={token ? <Admin /> : <Navigate to="/login" />} />
+            <Route path="/*" element={token ? (isAdmin ? <Navigate to="/admin" /> : <Chat />) : <Navigate to="/login" />} />
         </Routes>
     );
 }
 
 createRoot(document.getElementById('app')).render(
-    <BrowserRouter>
-        <App />
-    </BrowserRouter>
+    <ThemeProvider>
+        <BrowserRouter>
+            <App />
+        </BrowserRouter>
+    </ThemeProvider>
 );

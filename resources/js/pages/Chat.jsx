@@ -13,21 +13,8 @@ api.interceptors.request.use((config) => {
     return config;
 });
 
-const echo = new Echo({
-    broadcaster: 'pusher',
-    key: import.meta.env.VITE_PUSHER_APP_KEY,
-    cluster: import.meta.env.VITE_PUSHER_APP_CLUSTER,
-    forceTLS: true,
-    authorizer: (channel) => ({
-        authorize: (socketId, callback) => {
-            api.post('/broadcasting/auth', {
-                socket_id: socketId,
-                channel_name: channel.name,
-            }).then(res => callback(null, res.data))
-                .catch(err => callback(err));
-        },
-    }),
-});
+// Temps réel désactivé pour éviter les erreurs WS (sera réactivé en phase 3)
+const echo = null;
 
 const ROLE_LABELS = {
     pdg: 'PDG',
@@ -37,10 +24,10 @@ const ROLE_LABELS = {
 };
 
 const ROLE_COLORS = {
-    pdg: '#f59e0b',
-    directeur: '#06b6d4',
-    chef_service: '#8b5cf6',
-    employe: '#64748b',
+    pdg: 'var(--role-pdg)',
+    directeur: 'var(--role-directeur)',
+    chef_service: 'var(--role-chef)',
+    employe: 'var(--role-employe)',
 };
 
 const DEPT_ICONS = {
@@ -48,11 +35,131 @@ const DEPT_ICONS = {
 };
 
 function getInitials(name) {
-    return name?.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || '?';
+    return name?.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase() || '?';
 }
 
-// ── Sidebar ──
-function Sidebar({ conversations, activeId, onSelect, onNewChat, onLogout, user, view, setView, theme, onToggleTheme }) {
+function roleGradient(role) {
+    const base = ROLE_COLORS[role] || 'var(--primary)';
+    return `linear-gradient(135deg, ${base}, var(--primary))`;
+}
+
+/* ============================================================
+   Sidebar
+   ============================================================ */
+
+function NotificationBell({ onOpenConversation }) {
+    const [open, setOpen] = useState(false);
+    const [items, setItems] = useState([]);
+    const [unread, setUnread] = useState(0);
+    const ref = useRef(null);
+
+    const load = async () => {
+        try {
+            const r = await api.get('/notifications');
+            setItems(r.data.notifications || []);
+            setUnread(r.data.unread_count || 0);
+        } catch (e) {}
+    };
+
+    useEffect(() => {
+        load();
+        const id = setInterval(async () => {
+            try {
+                const r = await api.get('/notifications/unread-count');
+                setUnread(r.data.unread_count || 0);
+            } catch (e) {}
+        }, 20000);
+        const onClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+        document.addEventListener('mousedown', onClick);
+        return () => { clearInterval(id); document.removeEventListener('mousedown', onClick); };
+    }, []);
+
+    const handleToggle = async () => {
+        const next = !open;
+        setOpen(next);
+        if (next) await load();
+    };
+
+    const handleClick = async (n) => {
+        try { await api.post(`/notifications/${n.id}/read`); } catch (e) {}
+        setItems((prev) => prev.map((x) => x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x));
+        setUnread((u) => Math.max(0, u - (n.read_at ? 0 : 1)));
+        const convId = n.data?.conversation_id;
+        if (convId && onOpenConversation) onOpenConversation(convId);
+        setOpen(false);
+    };
+
+    const handleAllRead = async () => {
+        try { await api.post('/notifications/read-all'); } catch (e) {}
+        setItems((prev) => prev.map((x) => ({ ...x, read_at: x.read_at || new Date().toISOString() })));
+        setUnread(0);
+    };
+
+    const timeAgo = (iso) => {
+        if (!iso) return '';
+        const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+        if (s < 60) return `${s}s`;
+        if (s < 3600) return `${Math.floor(s / 60)}min`;
+        if (s < 86400) return `${Math.floor(s / 3600)}h`;
+        return `${Math.floor(s / 86400)}j`;
+    };
+
+    return (
+        <div ref={ref} style={{ position: 'relative' }}>
+            <button onClick={handleToggle} className="btn-icon" title="Notifications" aria-label="Notifications" style={{ position: 'relative' }}>
+                <svg className="w-[1.1rem] h-[1.1rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.17V11a6 6 0 10-12 0v3.17a2 2 0 01-.6 1.43L4 17h5m6 0a3 3 0 11-6 0" />
+                </svg>
+                {unread > 0 && (
+                    <span style={{
+                        position: 'absolute', top: -2, right: -2, minWidth: 16, height: 16,
+                        padding: '0 4px', borderRadius: 999, background: 'var(--danger, #ef4444)',
+                        color: '#fff', fontSize: 10, fontWeight: 700,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        border: '2px solid var(--bg)',
+                    }}>{unread > 99 ? '99+' : unread}</span>
+                )}
+            </button>
+            {open && (
+                <div style={{
+                    position: 'absolute', top: 'calc(100% + 8px)', right: 0, width: 340, maxHeight: 420,
+                    background: 'var(--panel, var(--bg-elev))', border: '1px solid var(--border)',
+                    borderRadius: 12, boxShadow: '0 10px 30px rgba(0,0,0,0.25)', zIndex: 50,
+                    display: 'flex', flexDirection: 'column', overflow: 'hidden',
+                }}>
+                    <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <strong style={{ fontSize: 14, color: 'var(--text)' }}>Notifications</strong>
+                        {unread > 0 && (
+                            <button onClick={handleAllRead} style={{ background: 'transparent', border: 'none', color: 'var(--primary)', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>Tout marquer lu</button>
+                        )}
+                    </div>
+                    <div style={{ flex: 1, overflowY: 'auto' }}>
+                        {items.length === 0 ? (
+                            <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-subtle)', fontSize: 13 }}>Aucune notification</div>
+                        ) : items.map((n) => (
+                            <button key={n.id} onClick={() => handleClick(n)} style={{
+                                display: 'block', width: '100%', textAlign: 'left',
+                                padding: '10px 14px', border: 'none', cursor: 'pointer',
+                                background: n.read_at ? 'transparent' : 'var(--primary-soft, rgba(99,102,241,0.08))',
+                                borderBottom: '1px solid var(--border)',
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                                    {!n.read_at && <span style={{ width: 8, height: 8, borderRadius: 999, background: 'var(--primary)' }} />}
+                                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.title}</span>
+                                    <span style={{ fontSize: 10, color: 'var(--text-subtle)' }}>{timeAgo(n.created_at)}</span>
+                                </div>
+                                {n.body && <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.body}</div>}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+function Sidebar({ conversations, activeId, onSelect, onNewChat, onLogout, user, view, setView, mobileOpen, onCloseMobile, onlineIds = [] }) {
+    const isOnline = (id) => onlineIds.includes(id);
     const [search, setSearch] = useState('');
     const [searchResults, setSearchResults] = useState([]);
     const [departments, setDepartments] = useState([]);
@@ -60,13 +167,16 @@ function Sidebar({ conversations, activeId, onSelect, onNewChat, onLogout, user,
     const [channels, setChannels] = useState([]);
 
     useEffect(() => {
-        api.get('/departments').then(res => setDepartments(res.data)).catch(console.error);
-        api.get('/channels').then(res => setChannels(res.data)).catch(console.error);
+        api.get('/departments').then((res) => setDepartments(res.data)).catch(console.error);
+        api.get('/channels').then((res) => setChannels(res.data)).catch(console.error);
     }, []);
 
     const handleSearch = async (q) => {
         setSearch(q);
-        if (q.length < 2) { setSearchResults([]); return; }
+        if (q.length < 2) {
+            setSearchResults([]);
+            return;
+        }
         try {
             const res = await api.get(`/users/search?q=${q}`);
             setSearchResults(res.data);
@@ -85,103 +195,90 @@ function Sidebar({ conversations, activeId, onSelect, onNewChat, onLogout, user,
 
     const getConversationName = (conv) => {
         if (conv.name) return conv.name;
-        const other = conv.users?.find(u => u.id !== user?.id);
+        const other = conv.users?.find((u) => u.id !== user?.id);
         return other?.name || 'Conversation';
     };
 
     const getConversationRole = (conv) => {
-        const other = conv.users?.find(u => u.id !== user?.id);
+        const other = conv.users?.find((u) => u.id !== user?.id);
         return other?.poste || other?.role || '';
     };
 
+    const totalUnread = conversations.reduce((s, c) => s + (c.unread_count || 0), 0);
+
     return (
-        <div className="flex flex-col h-full" style={{
-            background: 'var(--panel)',
-            borderRight: '1px solid var(--border)',
-        }}>
+        <aside className={`chat-sidebar ${mobileOpen ? 'is-open' : ''}`}>
             {/* Header */}
-            <div className="p-4" style={{ borderBottom: '1px solid rgba(6,182,212,0.08)' }}>
+            <div className="sidebar-header">
                 <div className="flex items-center justify-between mb-3">
-                    <h1 className="text-lg font-bold" style={{
-                        fontFamily: "'Sora', sans-serif",
-                        background: 'linear-gradient(135deg, #22d3ee, #818cf8)',
-                        WebkitBackgroundClip: 'text',
-                        WebkitTextFillColor: 'transparent',
-                    }}>SecureChat</h1>
+                    <h1 className="sidebar-brand">SecureChat</h1>
                     <div className="flex items-center gap-2">
-                        <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-                        <button onClick={onLogout} className="p-2 rounded-lg transition-colors duration-200"
-                                style={{ color: '#64748b' }}
-                                onMouseEnter={(e) => e.target.style.color = '#ef4444'}
-                                onMouseLeave={(e) => e.target.style.color = '#64748b'}>
-                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <ThemeToggle />
+                        <button
+                            onClick={onLogout}
+                            className="btn-icon"
+                            title="Se déconnecter"
+                            aria-label="Se déconnecter"
+                        >
+                            <svg className="w-[1.1rem] h-[1.1rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                             </svg>
                         </button>
                     </div>
                 </div>
 
-                {/* Navigation tabs */}
-                <div className="flex gap-1 mb-3 p-1 rounded-xl" style={{ background: 'rgba(6,182,212,0.04)', border: '1px solid rgba(6,182,212,0.08)' }}>
+                {/* Tabs */}
+                <div className="nav-tabs">
                     {[
-                        { id: 'chats', label: 'Messages', icon: '💬', badge: conversations.reduce((sum, c) => sum + (c.unread_count || 0), 0) },
-                        { id: 'org', label: 'Entreprise', icon: '🏢', badge: 0 },
+                        { id: 'chats', label: 'Messages', icon: '💬', badge: totalUnread },
+                        { id: 'org', label: 'Équipe', icon: '🏢', badge: 0 },
                         { id: 'channels', label: 'Canaux', icon: '#', badge: 0 },
-                        ].map(tab => (
-                        <button key={tab.id} onClick={() => setView(tab.id)}
-                                className="flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all duration-200"
-                                style={{
-                                    fontFamily: "'Sora', sans-serif",
-                                    background: view === tab.id ? 'rgba(6,182,212,0.15)' : 'transparent',
-                                    color: view === tab.id ? '#06b6d4' : '#64748b',
-                                    border: view === tab.id ? '1px solid rgba(6,182,212,0.2)' : '1px solid transparent',
-                                }}>
-    <span className="flex items-center justify-center gap-1">
-        {tab.icon} {tab.label}
-        {tab.badge > 0 && (
-            <span className="min-w-4 h-4 px-1 rounded-full flex items-center justify-center text-xs font-bold text-white"
-                  style={{ background: '#ef4444', fontSize: '10px' }}>
-                {tab.badge > 99 ? '99+' : tab.badge}
-            </span>
-        )}
-    </span>
+                    ].map((tab) => (
+                        <button
+                            key={tab.id}
+                            onClick={() => setView(tab.id)}
+                            className={`nav-tab ${view === tab.id ? 'active' : ''}`}
+                        >
+                            <span>{tab.icon}</span>
+                            <span>{tab.label}</span>
+                            {tab.badge > 0 && <span className="badge">{tab.badge > 99 ? '99+' : tab.badge}</span>}
                         </button>
                     ))}
                 </div>
 
                 {/* Search */}
-                <div className="relative">
-                    <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: '#475569' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <div className="search-wrap">
+                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
-                    <input type="text" value={search} onChange={(e) => handleSearch(e.target.value)}
-                           className="w-full pl-10 pr-4 py-2.5 rounded-xl text-sm text-white focus:outline-none transition-all duration-300"
-                           style={{ background: 'rgba(30,41,59,0.8)', border: '1px solid rgba(100,116,139,0.15)', fontFamily: "'Sora', sans-serif" }}
-                           onFocus={(e) => e.target.style.border = '1px solid rgba(6,182,212,0.4)'}
-                           onBlur={(e) => e.target.style.border = '1px solid rgba(100,116,139,0.15)'}
-                           placeholder="Rechercher un collègue, poste..."
+                    <input
+                        type="text"
+                        value={search}
+                        onChange={(e) => handleSearch(e.target.value)}
+                        className="search-input"
+                        placeholder="Rechercher un collègue, un poste..."
                     />
                 </div>
 
-                {/* Search Results */}
                 {searchResults.length > 0 && (
-                    <div className="mt-2 rounded-xl overflow-hidden max-h-64 overflow-y-auto" style={{
-                        background: 'rgba(30,41,59,0.95)', border: '1px solid rgba(100,116,139,0.15)',
-                    }}>
-                        {searchResults.map(u => (
-                            <button key={u.id} onClick={() => startChat(u.id)}
-                                    className="w-full flex items-center gap-3 px-4 py-3 transition-colors duration-200 text-left"
-                                    style={{ borderBottom: '1px solid rgba(100,116,139,0.08)' }}
-                                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(6,182,212,0.08)'}
-                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                                <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
-                                     style={{ background: `linear-gradient(135deg, ${ROLE_COLORS[u.role] || '#64748b'}, #3b82f6)` }}>
+                    <div
+                        className="mt-2 rounded-xl overflow-hidden max-h-64 overflow-y-auto"
+                        style={{ background: 'var(--panel-solid)', border: '1px solid var(--border)' }}
+                    >
+                        {searchResults.map((u) => (
+                            <button
+                                key={u.id}
+                                onClick={() => startChat(u.id)}
+                                className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-[var(--panel-hover)]"
+                                style={{ borderBottom: '1px solid var(--border)', background: 'transparent' }}
+                            >
+                                <div className="avatar avatar-sm" style={{ background: roleGradient(u.role) }}>
                                     {getInitials(u.name)}
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium text-white truncate" style={{ fontFamily: "'Sora', sans-serif" }}>{u.name}</p>
+                                    <p className="text-sm font-medium truncate" style={{ color: 'var(--text)' }}>{u.name}</p>
                                     <p className="text-xs truncate" style={{ color: ROLE_COLORS[u.role] }}>{u.poste}</p>
-                                    <p className="text-xs truncate" style={{ color: '#475569' }}>{u.department?.name}</p>
+                                    <p className="text-xs truncate" style={{ color: 'var(--text-subtle)' }}>{u.department?.name}</p>
                                 </div>
                             </button>
                         ))}
@@ -189,115 +286,126 @@ function Sidebar({ conversations, activeId, onSelect, onNewChat, onLogout, user,
                 )}
             </div>
 
-            {/* Content based on view */}
-            <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: '#1e293b transparent' }}>
-
-                {/* ── Messages View ── */}
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto">
                 {view === 'chats' && (
                     conversations.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-full px-6">
-                            <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4" style={{ background: 'rgba(6,182,212,0.1)' }}>
-                                <span className="text-2xl">💬</span>
-                            </div>
-                            <p className="text-sm text-center" style={{ color: '#64748b', fontFamily: "'Sora', sans-serif" }}>
-                                Aucune conversation.<br />Recherchez un collègue ou parcourez l'entreprise.
+                        <div className="empty-state">
+                            <div className="empty-state-icon">💬</div>
+                            <p className="text-sm">
+                                Aucune conversation.<br />
+                                Recherchez un collègue ou parcourez l'équipe.
                             </p>
                         </div>
                     ) : (
-                        conversations.map(conv => (
-                            <button key={conv.id} onClick={() => onSelect(conv.id)}
-                                    className="w-full flex items-center gap-3 px-4 py-3.5 transition-all duration-200 text-left"
-                                    style={{
-                                        background: activeId === conv.id ? 'rgba(6,182,212,0.1)' : 'transparent',
-                                        borderLeft: activeId === conv.id ? '3px solid #22d3ee' : '3px solid transparent',
-                                        borderBottom: '1px solid rgba(100,116,139,0.06)',
-                                    }}
-                                    onMouseEnter={(e) => { if (activeId !== conv.id) e.currentTarget.style.background = 'rgba(6,182,212,0.06)'; }}
-                                    onMouseLeave={(e) => { if (activeId !== conv.id) e.currentTarget.style.background = 'transparent'; }}>
+                        conversations.map((conv) => (
+                            <button
+                                key={conv.id}
+                                onClick={() => { onSelect(conv.id); onCloseMobile(); }}
+                                className={`conv-row ${activeId === conv.id ? 'active' : ''}`}
+                            >
                                 <div className="relative shrink-0">
-                                    <div className="w-11 h-11 rounded-full flex items-center justify-center text-sm font-semibold text-white"
-                                         style={{ background: conv.type === 'group' ? 'linear-gradient(135deg, #8b5cf6, #6366f1)' : 'linear-gradient(135deg, #22d3ee, #818cf8)' }}>
+                                    <div
+                                        className="avatar"
+                                        style={{
+                                            background: conv.type === 'group'
+                                                ? 'linear-gradient(135deg, var(--role-chef), var(--primary))'
+                                                : 'var(--grad-primary)',
+                                        }}
+                                    >
                                         {conv.type === 'group' ? '#' : getInitials(getConversationName(conv))}
                                     </div>
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium text-white truncate" style={{ fontFamily: "'Sora', sans-serif" }}>
-                                        {getConversationName(conv)}
-                                    </p>
-                                    <p className="text-xs truncate mt-0.5" style={{ color: '#64748b' }}>
-                                        {conv.last_message?.encrypted_content || getConversationRole(conv) || 'Aucun message'}
+                                    <div className="flex items-center justify-between gap-2">
+                                        <p className="text-sm font-semibold truncate" style={{ color: 'var(--text)' }}>
+                                            {getConversationName(conv)}
+                                        </p>
+                                        {conv.last_message && (
+                                            <span className="text-[10px] shrink-0" style={{ color: conv.unread_count > 0 ? 'var(--primary)' : 'var(--text-subtle)' }}>
+                                                {new Date(conv.last_message.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <p className="text-xs truncate mt-0.5" style={{ color: conv.unread_count > 0 ? 'var(--text)' : 'var(--text-muted)', fontWeight: conv.unread_count > 0 ? 500 : 400 }}>
+                                        {conv.last_message
+                                            ? (conv.last_message.user_id === user?.id ? 'Vous : ' : '') + (conv.last_message.encrypted_content || '📎 Pièce jointe')
+                                            : (getConversationRole(conv) || 'Toucher pour discuter')}
                                     </p>
                                 </div>
                                 {conv.unread_count > 0 && (
-                                    <div className="shrink-0 min-w-5 h-5 px-1.5 rounded-full flex items-center justify-center"
-                                         style={{ background: 'linear-gradient(135deg, #22d3ee, #818cf8)', boxShadow: '0 0 10px rgba(6,182,212,0.4)' }}>
-                        <span className="text-xs font-bold text-white" style={{ fontFamily: "'Sora', sans-serif" }}>
-                            {conv.unread_count > 99 ? '99+' : conv.unread_count}
-                        </span>
-                                    </div>
+                                    <span className="badge" style={{ background: 'var(--primary)' }}>
+                                        {conv.unread_count > 99 ? '99+' : conv.unread_count}
+                                    </span>
                                 )}
                             </button>
                         ))
                     )
                 )}
 
-                {/* ── Organisation View ── */}
                 {view === 'org' && (
                     <div className="p-3">
-                        {departments.map(dept => (
+                        {departments.map((dept) => (
                             <div key={dept.id} className="mb-2">
-                                <button onClick={() => setExpandedDept(expandedDept === dept.id ? null : dept.id)}
-                                        className="w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200"
-                                        style={{
-                                            background: expandedDept === dept.id ? 'rgba(6,182,212,0.1)' : 'rgba(30,41,59,0.4)',
-                                            border: expandedDept === dept.id ? '1px solid rgba(6,182,212,0.2)' : '1px solid rgba(100,116,139,0.08)',
-                                        }}
-                                        onMouseEnter={(e) => e.currentTarget.style.background = expandedDept === dept.id ? 'rgba(6,182,212,0.1)' : 'rgba(30,41,59,0.6)'}
-                                        onMouseLeave={(e) => e.currentTarget.style.background = expandedDept === dept.id ? 'rgba(6,182,212,0.1)' : 'rgba(30,41,59,0.4)'}>
+                                <button
+                                    onClick={() => setExpandedDept(expandedDept === dept.id ? null : dept.id)}
+                                    className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left"
+                                    style={{
+                                        background: expandedDept === dept.id ? 'var(--primary-soft)' : 'var(--bg-elev)',
+                                        border: '1px solid var(--border)',
+                                        color: 'var(--text)',
+                                    }}
+                                >
                                     <span className="text-xl">{DEPT_ICONS[dept.code] || '🏢'}</span>
                                     <div className="flex-1 text-left">
-                                        <p className="text-sm font-medium text-white" style={{ fontFamily: "'Sora', sans-serif" }}>{dept.name}</p>
-                                        <p className="text-xs" style={{ color: '#64748b' }}>{dept.members?.length || 0} membres</p>
+                                        <p className="text-sm font-semibold">{dept.name}</p>
+                                        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                                            {dept.members?.length || 0} membres
+                                        </p>
                                     </div>
-                                    <svg className={`w-4 h-4 transition-transform duration-200 ${expandedDept === dept.id ? 'rotate-180' : ''}`}
-                                         style={{ color: '#64748b' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <svg
+                                        className={`w-4 h-4 transition-transform duration-200 ${expandedDept === dept.id ? 'rotate-180' : ''}`}
+                                        style={{ color: 'var(--text-muted)' }}
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                        strokeWidth={2}
+                                    >
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                                     </svg>
                                 </button>
 
                                 {expandedDept === dept.id && dept.members && (
-                                    <div className="mt-1 ml-4 space-y-1">
-                                        {/* Trier par rôle */}
-                                        {['pdg', 'directeur', 'chef_service', 'employe'].map(role => {
-                                            const roleMembers = dept.members.filter(m => m.role === role);
+                                    <div className="mt-1 ml-3 space-y-1">
+                                        {['pdg', 'directeur', 'chef_service', 'employe'].map((role) => {
+                                            const roleMembers = dept.members.filter((m) => m.role === role);
                                             if (roleMembers.length === 0) return null;
                                             return (
                                                 <div key={role}>
-                                                    <p className="text-xs font-semibold uppercase tracking-wider px-3 py-1.5 mt-2"
-                                                       style={{ color: ROLE_COLORS[role], fontFamily: "'Sora', sans-serif" }}>
+                                                    <p
+                                                        className="text-xs font-bold uppercase tracking-wider px-3 py-1.5 mt-2"
+                                                        style={{ color: ROLE_COLORS[role] }}
+                                                    >
                                                         {ROLE_LABELS[role]}
                                                     </p>
-                                                    {roleMembers.map(member => (
-                                                        <button key={member.id} onClick={() => startChat(member.id)}
-                                                                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all duration-200"
-                                                                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(6,182,212,0.08)'}
-                                                                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                                                    {roleMembers.map((m) => (
+                                                        <button
+                                                            key={m.id}
+                                                            onClick={() => startChat(m.id)}
+                                                            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left hover:bg-[var(--panel-hover)]"
+                                                            style={{ background: 'transparent', color: 'var(--text)' }}
+                                                        >
                                                             <div className="relative shrink-0">
-                                                                <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white"
-                                                                     style={{ background: `linear-gradient(135deg, ${ROLE_COLORS[member.role]}, #3b82f6)` }}>
-                                                                    {getInitials(member.name)}
+                                                                <div className="avatar avatar-sm" style={{ background: roleGradient(m.role) }}>
+                                                                    {getInitials(m.name)}
                                                                 </div>
-                                                                <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2"
-                                                                     style={{
-                                                                         background: member.status === 'online' ? '#22c55e' : member.status === 'away' ? '#eab308' : '#64748b',
-                                                                         borderColor: '#0f172a',
-                                                                     }} />
+                                                                <span
+                                                                    className={`status-dot ${isOnline(m.id) ? 'status-online' : 'status-offline'}`}
+                                                                />
                                                             </div>
                                                             <div className="flex-1 min-w-0 text-left">
-                                                                <p className="text-xs font-medium text-white truncate" style={{ fontFamily: "'Sora', sans-serif" }}>
-                                                                    {member.name}
-                                                                </p>
-                                                                <p className="text-xs truncate" style={{ color: '#475569' }}>{member.poste}</p>
+                                                                <p className="text-xs font-medium truncate">{m.name}</p>
+                                                                <p className="text-xs truncate" style={{ color: 'var(--text-subtle)' }}>{m.poste}</p>
                                                             </div>
                                                         </button>
                                                     ))}
@@ -311,101 +419,118 @@ function Sidebar({ conversations, activeId, onSelect, onNewChat, onLogout, user,
                     </div>
                 )}
 
-                {/*  Channels View  */}
                 {view === 'channels' && (
-                    <div className="p-3 space-y-1">
-                        {channels.map(ch => (
-                            <button key={ch.id} onClick={() => {
-                                api.get('/conversations').then(res => {
-                                    const channelConv = res.data.find(c => c.name && c.name.startsWith(ch.name));
-                                    if (channelConv) { onNewChat(channelConv); }
-                                });
-                            }}
-                                    className="w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 text-left"
-                                    style={{ background: 'rgba(6,182,212,0.03)', border: '1px solid rgba(6,182,212,0.06)' }}
-                                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(6,182,212,0.05)'}
-                                    onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(30,41,59,0.4)'}>
-                                <div className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold"
-                                     style={{ background: 'rgba(139,92,246,0.15)', color: '#8b5cf6', fontFamily: "'Sora', sans-serif" }}>
+                    <div className="p-3 space-y-2">
+                        {channels.map((ch) => (
+                            <button
+                                key={ch.id}
+                                onClick={() => {
+                                    api.get('/conversations').then((res) => {
+                                        const channelConv = res.data.find((c) => c.name && c.name.startsWith(ch.name));
+                                        if (channelConv) onNewChat(channelConv);
+                                    });
+                                }}
+                                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left"
+                                style={{ background: 'var(--bg-elev)', border: '1px solid var(--border)', color: 'var(--text)' }}
+                            >
+                                <div
+                                    className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold"
+                                    style={{ background: 'var(--primary-soft)', color: 'var(--primary)' }}
+                                >
                                     #
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium text-white truncate" style={{ fontFamily: "'Sora', sans-serif" }}>{ch.name}</p>
-                                    <p className="text-xs truncate" style={{ color: '#64748b' }}>{ch.description}</p>
+                                    <p className="text-sm font-semibold truncate">{ch.name}</p>
+                                    <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{ch.description}</p>
                                 </div>
-                                <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(100,116,139,0.15)', color: '#64748b' }}>
-                        {ch.members_count || 0}
-                    </span>
+                                <span className="chip chip-muted">{ch.members_count || 0}</span>
                             </button>
                         ))}
+                        {channels.length === 0 && (
+                            <div className="empty-state">
+                                <div className="empty-state-icon">#</div>
+                                <p className="text-sm">Aucun canal pour le moment</p>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
 
-            {/* User info */}
-            <div className="p-4" style={{ borderTop: '1px solid rgba(100,116,139,0.08)' }}>
-                <div className="flex items-center gap-3 px-2 py-2 rounded-xl"
-                     style={{ background: 'rgba(30,41,59,0.3)' }}>
+            {/* User footer */}
+            <div className="p-4" style={{ borderTop: '1px solid var(--border)' }}>
+                <div
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl"
+                    style={{ background: 'var(--bg-elev)', border: '1px solid var(--border)' }}
+                >
                     <div className="relative">
-                        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold text-white"
-                             style={{ background: `linear-gradient(135deg, ${ROLE_COLORS[user?.role] || '#06b6d4'}, #4f46e5)` }}>
+                        <div className="avatar" style={{ background: roleGradient(user?.role) }}>
                             {getInitials(user?.name)}
                         </div>
-                        <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2"
-                             style={{ background: '#22c55e', borderColor: '#0f172a' }} />
+                        <span className="status-dot status-online" />
                     </div>
                     <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-white truncate" style={{ fontFamily: "'Sora', sans-serif" }}>{user?.name}</p>
-                        <p className="text-xs truncate" style={{ color: ROLE_COLORS[user?.role], fontFamily: "'Sora', sans-serif", fontSize: '10px' }}>
+                        <p className="text-sm font-semibold truncate" style={{ color: 'var(--text)' }}>{user?.name}</p>
+                        <p className="text-xs truncate" style={{ color: ROLE_COLORS[user?.role] }}>
                             {user?.poste || ROLE_LABELS[user?.role]}
                         </p>
                     </div>
-                    <div className="w-2 h-2 rounded-full" style={{ background: '#22c55e', boxShadow: '0 0 8px rgba(34,197,94,0.5)' }} />
                 </div>
             </div>
-        </div>
+        </aside>
     );
 }
 
-//  Message Bubble
+/* ============================================================
+   Message bubble
+   ============================================================ */
+
 function MessageBubble({ message, isOwn }) {
     return (
-        <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'} mb-4`}>
+        <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'} mb-3`}>
             {!isOwn && (
-                <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0 mr-2 mt-1"
-                     style={{ background: `linear-gradient(135deg, ${ROLE_COLORS[message.user?.role] || '#06b6d4'}, #3b82f6)` }}>
+                <div
+                    className="avatar avatar-sm mr-2 mt-1"
+                    style={{ background: roleGradient(message.user?.role) }}
+                >
                     {getInitials(message.user?.name)}
                 </div>
             )}
-            <div className={`max-w-xs lg:max-w-sm`}>
+            <div className="max-w-[75%] sm:max-w-sm">
                 {!isOwn && (
-                    <p className="text-xs font-semibold mb-1 ml-1" style={{ color: ROLE_COLORS[message.user?.role] || '#06b6d4', fontFamily: "'Sora', sans-serif" }}>
+                    <p
+                        className="text-xs font-semibold mb-1 ml-1"
+                        style={{ color: ROLE_COLORS[message.user?.role] || 'var(--primary)' }}
+                    >
                         {message.user?.name}
                     </p>
                 )}
-                <div className={`px-4 py-3 ${isOwn ? 'rounded-2xl rounded-tr-md' : 'rounded-2xl rounded-tl-md'}`}
-                     style={{
-                         background: isOwn
-                             ? 'linear-gradient(135deg, #06b6d4, #6366f1)'
-                             : 'rgba(30,41,59,0.6)',
-                         border: isOwn ? 'none' : '1px solid rgba(100,116,139,0.08)',
-                         boxShadow: isOwn
-                             ? '0 4px 25px rgba(6,182,212,0.35)'
-                             : '0 2px 10px rgba(0,0,0,0.1)',
-                         backdropFilter: isOwn ? 'none' : 'blur(10px)',
-                     }}>
-                    <p className="text-sm leading-relaxed" style={{
-                        color: isOwn ? '#ffffff' : '#e2e8f0',
-                        fontFamily: "'Sora', sans-serif",
-                    }}>
-                        {message.encrypted_content}
-                    </p>
-                    <div className={`flex items-center gap-1.5 mt-1.5 ${isOwn ? 'justify-end' : ''}`}>
-                        <span className="text-xs" style={{ color: isOwn ? 'rgba(255,255,255,0.5)' : '#475569', fontFamily: "'Sora', sans-serif", fontSize: '10px' }}>
+                <div className={isOwn ? 'bubble-own' : 'bubble-other'}>
+                    {message.encrypted_content && (
+                        <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                            {message.encrypted_content}
+                        </p>
+                    )}
+                    {message.attachments && message.attachments.length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: message.encrypted_content ? 8 : 0 }}>
+                            {message.attachments.map((att) => <AttachmentItem key={att.id} att={att} isOwn={isOwn} />)}
+                        </div>
+                    )}
+                    <div className={`flex items-center gap-1.5 mt-1 ${isOwn ? 'justify-end' : ''}`}>
+                        <span
+                            className="text-[10px]"
+                            style={{ color: isOwn ? 'rgba(255,255,255,0.75)' : 'var(--text-subtle)' }}
+                        >
                             {new Date(message.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                         </span>
                         {isOwn && (
-                            <svg className="w-4 h-4" style={{ color: message.is_read ? '#22d3ee' : 'rgba(255,255,255,0.35)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <svg
+                                className="w-4 h-4"
+                                style={{ color: message.is_read ? 'rgba(255,255,255,1)' : 'rgba(255,255,255,0.55)' }}
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                strokeWidth={2.5}
+                            >
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M1 13l4 4L15 7" />
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M7 13l4 4L21 7" />
                             </svg>
@@ -416,46 +541,158 @@ function MessageBubble({ message, isOwn }) {
         </div>
     );
 }
-// ── Chat Area ──
-function ChatArea({ conversation, user }) {
+
+/* ============================================================
+   Attachment item
+   ============================================================ */
+
+function AttachmentItem({ att, isOwn }) {
+    const formatSize = (bytes) => {
+        if (!bytes) return '';
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    };
+    const isImage = att.mime_type && att.mime_type.startsWith('image/');
+    const downloadUrl = `/api/attachments/${att.id}/download`;
+    const token = localStorage.getItem('token');
+
+    const handleDownload = async (e) => {
+        e.preventDefault();
+        try {
+            const res = await fetch(downloadUrl, { headers: { Authorization: `Bearer ${token}` } });
+            if (!res.ok) throw new Error('Download failed');
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = att.original_name || att.filename || 'fichier';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const bg = isOwn ? 'rgba(255,255,255,0.18)' : 'var(--surface-muted, rgba(0,0,0,0.05))';
+    const textColor = isOwn ? '#fff' : 'var(--text)';
+    const subColor = isOwn ? 'rgba(255,255,255,0.75)' : 'var(--text-subtle)';
+
+    return (
+        <button
+            type="button"
+            onClick={handleDownload}
+            style={{
+                display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
+                background: bg, borderRadius: 10, border: 'none', cursor: 'pointer',
+                textAlign: 'left', width: '100%', color: textColor,
+            }}
+        >
+            <div style={{
+                width: 36, height: 36, borderRadius: 8,
+                background: isOwn ? 'rgba(255,255,255,0.2)' : 'var(--primary-soft, rgba(99,102,241,0.15))',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    {isImage ? (
+                        <>
+                            <rect x="3" y="3" width="18" height="18" rx="2" />
+                            <circle cx="8.5" cy="8.5" r="1.5" />
+                            <path d="M21 15l-5-5L5 21" />
+                        </>
+                    ) : (
+                        <>
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                        </>
+                    )}
+                </svg>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {att.original_name || att.filename || 'Fichier'}
+                </div>
+                <div style={{ fontSize: 11, color: subColor }}>{formatSize(att.size)}</div>
+            </div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.7 }}>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+        </button>
+    );
+}
+
+/* ============================================================
+   Chat area
+   ============================================================ */
+
+function ChatArea({ conversation, user, onOpenSidebar, onlineIds = [] }) {
     const [messages, setMessages] = useState([]);
     const [newMessage, setNewMessage] = useState('');
     const [loading, setLoading] = useState(false);
     const [sending, setSending] = useState(false);
+    const [pendingFiles, setPendingFiles] = useState([]);
     const messagesEndRef = useRef(null);
+    const fileInputRef = useRef(null);
 
     const getConversationName = () => {
+        if (!conversation) return '';
         if (conversation.name) return conversation.name;
-        const other = conversation.users?.find(u => u.id !== user?.id);
+        const other = conversation.users?.find((u) => u.id !== user?.id);
         return other?.name || 'Conversation';
     };
 
-    const getOtherUser = () => conversation.users?.find(u => u.id !== user?.id);
+    const getOtherUser = () => conversation?.users?.find((u) => u.id !== user?.id);
 
     useEffect(() => {
         if (!conversation?.id) return;
+        let alive = true;
         setLoading(true);
         api.get(`/conversations/${conversation.id}/messages`)
-            .then(res => {
+            .then((res) => {
+                if (!alive) return;
                 const msgs = res.data.data?.reverse() || [];
                 setMessages(msgs);
-                const lastReceived = [...msgs].reverse().find(m => m.user_id !== user?.id);
-                if (lastReceived) {
-                    api.post(`/messages/${lastReceived.id}/read`).catch(console.error);
-                }
+                const lastReceived = [...msgs].reverse().find((m) => m.user_id !== user?.id);
+                if (lastReceived) api.post(`/messages/${lastReceived.id}/read`).catch(() => {});
             })
             .catch(console.error)
-            .finally(() => setLoading(false));
+            .finally(() => { if (alive) setLoading(false); });
 
-        const channel = echo.private(`conversation.${conversation.id}`);
-        channel.listen('MessageSent', (e) => {
-            if (e.message.user_id !== user?.id) {
-                setMessages(prev => [...prev, e.message]);
-            }
-        });
+        // Polling: récupère les nouveaux messages toutes les 3s
+        const poll = async () => {
+            try {
+                const res = await api.get(`/conversations/${conversation.id}/messages`);
+                if (!alive) return;
+                const msgs = res.data.data?.reverse() || [];
+                setMessages((prev) => {
+                    if (msgs.length === prev.length && msgs[msgs.length - 1]?.id === prev[prev.length - 1]?.id) {
+                        return prev;
+                    }
+                    const lastReceived = [...msgs].reverse().find((m) => m.user_id !== user?.id);
+                    if (lastReceived && lastReceived.id !== prev[prev.length - 1]?.id) {
+                        api.post(`/messages/${lastReceived.id}/read`).catch(() => {});
+                    }
+                    return msgs;
+                });
+            } catch (e) {}
+        };
+        const pollId = setInterval(poll, 3000);
+
+        if (echo) {
+            const channel = echo.private(`conversation.${conversation.id}`);
+            channel.listen('MessageSent', (e) => {
+                if (e.message.user_id !== user?.id) setMessages((prev) => [...prev, e.message]);
+            });
+        }
 
         return () => {
-            echo.leave(`conversation.${conversation.id}`);
+            alive = false;
+            clearInterval(pollId);
+            if (echo) echo.leave(`conversation.${conversation.id}`);
         };
     }, [conversation?.id]);
 
@@ -465,31 +702,54 @@ function ChatArea({ conversation, user }) {
 
     const sendMessage = async (e) => {
         e.preventDefault();
-        if (!newMessage.trim() || sending) return;
+        if ((!newMessage.trim() && pendingFiles.length === 0) || sending) return;
         setSending(true);
         try {
-            const res = await api.post(`/conversations/${conversation.id}/messages`, { encrypted_content: newMessage });
-            setMessages(prev => [...prev, res.data]);
+            // 1. Créer le message (même vide si fichiers présents)
+            const res = await api.post(`/conversations/${conversation.id}/messages`, {
+                encrypted_content: newMessage || '',
+            });
+            const msg = res.data;
+
+            // 2. Uploader chaque fichier
+            if (pendingFiles.length > 0) {
+                const attachments = [];
+                for (const file of pendingFiles) {
+                    const fd = new FormData();
+                    fd.append('file', file);
+                    const r = await api.post(`/messages/${msg.id}/attachments`, fd, {
+                        headers: { 'Content-Type': 'multipart/form-data' },
+                    });
+                    attachments.push(r.data);
+                }
+                msg.attachments = attachments;
+            }
+
+            setMessages((prev) => [...prev, msg]);
             setNewMessage('');
-        } catch (e) { console.error(e); }
-        finally { setSending(false); }
+            setPendingFiles([]);
+        } catch (err) {
+            console.error(err);
+            alert(err?.response?.data?.message || 'Erreur lors de l\'envoi');
+        } finally { setSending(false); }
+    };
+
+    const handleFileChange = (e) => {
+        const files = Array.from(e.target.files || []);
+        setPendingFiles((prev) => [...prev, ...files]);
+        e.target.value = '';
     };
 
     if (!conversation) {
         return (
-            <div className="flex-1 flex flex-col items-center justify-center" style={{ background: 'radial-gradient(ellipse at 30% 40%, rgba(6,182,212,0.04), #030712 60%)' }}>
-                <div className="w-24 h-24 rounded-full flex items-center justify-center mb-6"
-                     style={{ background: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.15)' }}>
-                    <span className="text-4xl">🏢</span>
+            <div className="chat-main">
+                <div className="flex-1 flex flex-col items-center justify-center" style={{ background: 'var(--grad-bg)' }}>
+                    <div className="empty-state-icon" style={{ width: '6rem', height: '6rem', fontSize: '2.5rem' }}>🏢</div>
+                    <h2 className="text-xl font-bold mt-4 mb-2 auth-brand">SecureChat Entreprise</h2>
+                    <p className="text-sm text-center max-w-sm" style={{ color: 'var(--text-muted)' }}>
+                        Sélectionnez une conversation ou parcourez l'organigramme pour commencer à discuter.
+                    </p>
                 </div>
-                <h2 className="text-xl font-semibold mb-2" style={{
-                    fontFamily: "'Sora', sans-serif",
-                    background: 'linear-gradient(135deg, #e2e8f0, #94a3b8)',
-                    WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-                }}>SecureChat Entreprise</h2>
-                <p className="text-sm text-center" style={{ color: '#475569', fontFamily: "'Sora', sans-serif" }}>
-                    Sélectionnez une conversation ou<br />parcourez l'organigramme pour commencer
-                </p>
             </div>
         );
     }
@@ -497,58 +757,58 @@ function ChatArea({ conversation, user }) {
     const other = getOtherUser();
 
     return (
-        <div className="flex-1 flex flex-col" style={{ background: 'radial-gradient(ellipse at top, #0a1628, #030712)' }}>
-            {/* Chat Header */}
-            <div className="flex items-center gap-3 px-6 py-4" style={{
-                background: 'rgba(15,23,42,0.9)', borderBottom: '1px solid rgba(6,182,212,0.08)', backdropFilter: 'blur(20px)',
-            }}>
+        <div className="chat-main">
+            {/* Header */}
+            <div className="chat-header">
+                <button
+                    className="btn-icon lg:hidden"
+                    onClick={onOpenSidebar}
+                    aria-label="Ouvrir la liste"
+                >
+                    <svg className="w-[1.1rem] h-[1.1rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                </button>
+
                 <div className="relative">
-                    <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold text-white"
-                         style={{ background: `linear-gradient(135deg, ${ROLE_COLORS[other?.role] || '#06b6d4'}, #3b82f6)` }}>
+                    <div className="avatar" style={{ background: roleGradient(other?.role) }}>
                         {getInitials(getConversationName())}
                     </div>
-                    <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2"
-                         style={{ background: '#22c55e', borderColor: '#0f172a' }} />
+                    <span className={`status-dot ${other && onlineIds.includes(other.id) ? 'status-online' : 'status-offline'}`} />
                 </div>
-                <div className="flex-1">
-                    <h2 className="text-sm font-semibold text-white" style={{ fontFamily: "'Sora', sans-serif" }}>
+                <div className="flex-1 min-w-0">
+                    <h2 className="text-sm font-bold truncate" style={{ color: 'var(--text)' }}>
                         {getConversationName()}
                     </h2>
-                    <p className="text-xs" style={{ color: ROLE_COLORS[other?.role] || '#64748b' }}>
-                        {other?.poste || 'En ligne'}
+                    <p className="text-xs truncate" style={{ color: ROLE_COLORS[other?.role] || 'var(--text-muted)' }}>
+                        {other && onlineIds.includes(other.id) ? 'En ligne' : (other?.poste || 'Hors ligne')}
                     </p>
                 </div>
-                <div className="flex items-center gap-2">
-                    {other?.department?.name && (
-                        <span className="text-xs px-3 py-1 rounded-full" style={{ background: 'rgba(100,116,139,0.15)', color: '#94a3b8' }}>
-                            {other.department.name}
-                        </span>
-                    )}
-                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-full"
-                         style={{ background: 'rgba(6,182,212,0.1)', border: '1px solid rgba(6,182,212,0.2)' }}>
-                        <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#06b6d4' }} />
-                        <span className="text-xs font-medium" style={{ color: '#06b6d4', fontFamily: "'Sora', sans-serif" }}>Chiffré E2E</span>
-                    </div>
+                <div className="hidden sm:flex items-center gap-2">
+                    {other?.department?.name && <span className="chip chip-muted">{other.department.name}</span>}
+                    <span className="chip">
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
+                        Chiffré E2E
+                    </span>
                 </div>
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-6 py-4" style={{ scrollbarWidth: 'thin', scrollbarColor: '#1e293b transparent' }}>
+            <div className="chat-messages">
                 {loading ? (
                     <div className="flex items-center justify-center h-full">
-                        <svg className="animate-spin h-8 w-8" style={{ color: '#06b6d4' }} viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
+                        <div className="spinner" />
                     </div>
                 ) : messages.length === 0 ? (
-                    <div className="flex items-center justify-center h-full">
-                        <p className="text-sm" style={{ color: '#475569', fontFamily: "'Sora', sans-serif" }}>
-                            Commencez la conversation. Les messages sont chiffrés de bout en bout.
+                    <div className="empty-state">
+                        <div className="empty-state-icon">💬</div>
+                        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                            Commencez la conversation.<br />
+                            Les messages sont chiffrés de bout en bout.
                         </p>
                     </div>
                 ) : (
-                    messages.map(msg => (
+                    messages.map((msg) => (
                         <MessageBubble key={msg.id} message={msg} isOwn={msg.user_id === user?.id} />
                     ))
                 )}
@@ -556,41 +816,58 @@ function ChatArea({ conversation, user }) {
             </div>
 
             {/* Input */}
-            <div className="px-5 py-4" style={{
-                background: 'rgba(3,7,18,0.95)',
-                borderTop: '1px solid rgba(100,116,139,0.08)',
-            }}>
-                <form onSubmit={sendMessage} className="flex items-center gap-3">
-                    <button type="button" className="p-3 rounded-xl transition-all duration-300 hover:scale-105"
-                            style={{ background: 'rgba(6,182,212,0.04)', border: '1px solid rgba(6,182,212,0.08)' }}
-                            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(6,182,212,0.1)'; e.currentTarget.style.borderColor = 'rgba(6,182,212,0.3)'; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(6,182,212,0.05)'; e.currentTarget.style.borderColor = 'rgba(100,116,139,0.1)'; }}>
-                        <svg className="w-5 h-5" style={{ color: '#64748b' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <div className="chat-input-bar">
+                {pendingFiles.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                        {pendingFiles.map((f, i) => (
+                            <div key={i} style={{
+                                display: 'flex', alignItems: 'center', gap: 6,
+                                padding: '6px 10px', background: 'var(--bg-elev)',
+                                borderRadius: 999, border: '1px solid var(--border)',
+                                fontSize: 12,
+                            }}>
+                                <span>📎</span>
+                                <span style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
+                                <button type="button" onClick={() => setPendingFiles((p) => p.filter((_, j) => j !== i))}
+                                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 16, lineHeight: 1 }}>×</button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+                <form onSubmit={sendMessage} className="flex items-center gap-2">
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        onChange={handleFileChange}
+                        style={{ display: 'none' }}
+                    />
+                    <button type="button" onClick={() => fileInputRef.current?.click()} className="btn-icon" title="Joindre un fichier" aria-label="Joindre un fichier">
+                        <svg className="w-[1.1rem] h-[1.1rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
                         </svg>
                     </button>
-                    <div className="flex-1 relative">
-                        <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)}
-                               className="w-full px-5 py-3.5 rounded-2xl text-sm text-white focus:outline-none transition-all duration-500"
-                               style={{
-                                   fontFamily: "'Sora', sans-serif",
-                                   background: 'rgba(15,23,42,0.8)',
-                                   border: '1px solid rgba(100,116,139,0.1)',
-                                   boxShadow: newMessage ? '0 0 20px rgba(6,182,212,0.05), inset 0 0 20px rgba(6,182,212,0.02)' : 'none',
-                               }}
-                               onFocus={(e) => { e.target.style.border = '1px solid rgba(6,182,212,0.3)'; e.target.style.boxShadow = '0 0 25px rgba(6,182,212,0.08)'; }}
-                               onBlur={(e) => { e.target.style.border = '1px solid rgba(100,116,139,0.1)'; e.target.style.boxShadow = 'none'; }}
-                               placeholder="Écrivez votre message..."
-                        />
-                    </div>
-                    <button type="submit" disabled={!newMessage.trim() || sending}
-                            className="p-3 rounded-xl transition-all duration-300 disabled:opacity-20 hover:scale-105 active:scale-95"
-                            style={{
-                                background: newMessage.trim() ? 'linear-gradient(135deg, #06b6d4, #6366f1)' : 'rgba(30,41,59,0.6)',
-                                boxShadow: newMessage.trim() ? '0 0 25px rgba(8,145,178,0.3)' : 'none',
-                                border: newMessage.trim() ? 'none' : '1px solid rgba(100,116,139,0.1)',
-                            }}>
-                        <svg className="w-5 h-5" style={{ color: newMessage.trim() ? '#ffffff' : '#475569' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <input
+                        type="text"
+                        value={newMessage}
+                        onChange={(e) => setNewMessage(e.target.value)}
+                        className="input"
+                        style={{ borderRadius: '999px' }}
+                        placeholder="Écrivez votre message..."
+                    />
+                    <button
+                        type="submit"
+                        disabled={(!newMessage.trim() && pendingFiles.length === 0) || sending}
+                        className="btn-icon"
+                        style={{
+                            background: (newMessage.trim() || pendingFiles.length > 0) ? 'var(--grad-primary)' : 'var(--bg-elev)',
+                            borderColor: (newMessage.trim() || pendingFiles.length > 0) ? 'transparent' : 'var(--border)',
+                            color: (newMessage.trim() || pendingFiles.length > 0) ? '#fff' : 'var(--text-subtle)',
+                            boxShadow: (newMessage.trim() || pendingFiles.length > 0) ? 'var(--shadow-glow)' : 'none',
+                        }}
+                        aria-label="Envoyer"
+                    >
+                        <svg className="w-[1.1rem] h-[1.1rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
                         </svg>
                     </button>
@@ -599,62 +876,98 @@ function ChatArea({ conversation, user }) {
         </div>
     );
 }
-// ── Main Chat Page ──
-function Chat({ theme, onToggleTheme }) {
+
+/* ============================================================
+   Main Chat Page
+   ============================================================ */
+
+function Chat() {
     const [conversations, setConversations] = useState([]);
     const [activeConvId, setActiveConvId] = useState(null);
     const [user, setUser] = useState(null);
-    const [sidebarOpen, setSidebarOpen] = useState(true);
     const [view, setView] = useState('chats');
+    const [mobileOpen, setMobileOpen] = useState(false);
+    const [onlineIds, setOnlineIds] = useState([]);
+
+    // Heartbeat + online polling
+    useEffect(() => {
+        let alive = true;
+        const ping = async () => {
+            try { await api.post('/user/heartbeat'); } catch (e) {}
+            try {
+                const r = await api.get('/users/online');
+                if (alive) setOnlineIds(r.data || []);
+            } catch (e) {}
+        };
+        ping();
+        const id = setInterval(ping, 30000);
+        const onFocus = () => ping();
+        window.addEventListener('focus', onFocus);
+        return () => { alive = false; clearInterval(id); window.removeEventListener('focus', onFocus); };
+    }, []);
+
+    // Polling liste conversations toutes les 5s pour détecter nouveaux messages
+    useEffect(() => {
+        let alive = true;
+        const fetchConvs = async () => {
+            try {
+                const res = await api.get('/conversations');
+                if (alive) setConversations(res.data);
+            } catch (e) {}
+        };
+        const id = setInterval(fetchConvs, 5000);
+        return () => { alive = false; clearInterval(id); };
+    }, []);
 
     useEffect(() => {
-        api.get('/user/profile').then(res => {
+        api.get('/user/profile').then((res) => {
             setUser(res.data);
             localStorage.setItem('user', JSON.stringify(res.data));
         }).catch(console.error);
 
-        api.get('/conversations').then(res => {
+        api.get('/conversations').then((res) => {
             setConversations(res.data);
 
-            res.data.forEach(conv => {
-                echo.private(`conversation.${conv.id}`)
-                    .listen('MessageSent', (e) => {
-                        const currentUser = JSON.parse(localStorage.getItem('user'));
-                        setConversations(prev => {
-                            const updated = prev.map(c => {
-                                if (c.id === e.message.conversation_id) {
-                                    return {
-                                        ...c,
-                                        last_message: e.message,
-                                        unread_count: e.message.user_id !== currentUser?.id ? (c.unread_count || 0) + 1 : c.unread_count,
-                                    };
-                                }
-                                return c;
-                            });
-                            const convIndex = updated.findIndex(c => c.id === e.message.conversation_id);
-                            if (convIndex > 0) {
-                                const [conv] = updated.splice(convIndex, 1);
-                                updated.unshift(conv);
+            if (!echo) return;
+            res.data.forEach((conv) => {
+                echo.private(`conversation.${conv.id}`).listen('MessageSent', (e) => {
+                    const currentUser = JSON.parse(localStorage.getItem('user'));
+                    setConversations((prev) => {
+                        const updated = prev.map((c) => {
+                            if (c.id === e.message.conversation_id) {
+                                return {
+                                    ...c,
+                                    last_message: e.message,
+                                    unread_count: e.message.user_id !== currentUser?.id
+                                        ? (c.unread_count || 0) + 1
+                                        : c.unread_count,
+                                };
                             }
-                            return updated;
+                            return c;
                         });
+                        const convIndex = updated.findIndex((c) => c.id === e.message.conversation_id);
+                        if (convIndex > 0) {
+                            const [conv] = updated.splice(convIndex, 1);
+                            updated.unshift(conv);
+                        }
+                        return updated;
                     });
+                });
             });
         }).catch(console.error);
 
-        return () => {
-            echo.disconnect();
-        };
+        return () => echo && echo.disconnect();
     }, []);
 
     const handleNewChat = (conv) => {
-        setConversations(prev => {
-            const exists = prev.find(c => c.id === conv.id);
+        setConversations((prev) => {
+            const exists = prev.find((c) => c.id === conv.id);
             if (exists) return prev;
             return [conv, ...prev];
         });
         setActiveConvId(conv.id);
         setView('chats');
+        setMobileOpen(false);
     };
 
     const handleLogout = async () => {
@@ -664,32 +977,36 @@ function Chat({ theme, onToggleTheme }) {
         window.location.href = '/login';
     };
 
-    const activeConversation = conversations.find(c => c.id === activeConvId);
+    const activeConversation = conversations.find((c) => c.id === activeConvId);
 
     return (
-        <div className="h-screen flex" style={{ background: 'var(--bg)' }}>
-            <button onClick={() => setSidebarOpen(!sidebarOpen)}
-                    className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-xl"
-                    style={{ background: 'rgba(15,23,42,0.9)', border: '1px solid rgba(100,116,139,0.2)' }}>
-                <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-            </button>
+        <div className="chat-shell">
+            <Sidebar
+                conversations={conversations}
+                activeId={activeConvId}
+                onSelect={(id) => {
+                    setActiveConvId(id);
+                    setView('chats');
+                    setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, unread_count: 0 } : c)));
+                }}
+                onNewChat={handleNewChat}
+                onLogout={handleLogout}
+                user={user}
+                view={view}
+                setView={setView}
+                mobileOpen={mobileOpen}
+                onCloseMobile={() => setMobileOpen(false)}
+                onlineIds={onlineIds}
+            />
 
-            <div className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 fixed lg:relative z-40 w-80 h-full transition-transform duration-300`}>
-                <Sidebar conversations={conversations} activeId={activeConvId}
-                         onSelect={(id) => {
-                             setActiveConvId(id);
-                             setView('chats');
-                             setConversations(prev => prev.map(c => c.id === id ? { ...c, unread_count: 0 } : c));
-                             if (window.innerWidth < 1024) setSidebarOpen(false);
-                         }}
-                         onNewChat={handleNewChat} onLogout={handleLogout} user={user} view={view} setView={setView} theme={theme} onToggleTheme={onToggleTheme} />
-            </div>
+            {mobileOpen && <div className="chat-backdrop" onClick={() => setMobileOpen(false)} />}
 
-            {sidebarOpen && <div onClick={() => setSidebarOpen(false)} className="lg:hidden fixed inset-0 z-30 bg-black/60 backdrop-blur-sm" />}
-
-            <ChatArea conversation={activeConversation} user={user} />
+            <ChatArea
+                conversation={activeConversation}
+                user={user}
+                onOpenSidebar={() => setMobileOpen(true)}
+                onlineIds={onlineIds}
+            />
         </div>
     );
 }

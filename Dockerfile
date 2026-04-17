@@ -1,38 +1,114 @@
-FROM node:22-alpine AS frontend-builder
+# syntax=docker/dockerfile:1.6
+
+# ============================================================
+# 1. Build des assets front (Vite)
+# ============================================================
+FROM node:22-alpine AS frontend
+
 WORKDIR /app
+
+ARG VITE_PUSHER_APP_KEY=securechat-key
+ARG VITE_PUSHER_APP_CLUSTER=mt1
+ARG VITE_PUSHER_HOST=localhost
+ARG VITE_PUSHER_PORT=6001
+ARG VITE_PUSHER_SCHEME=http
+ENV VITE_PUSHER_APP_KEY=$VITE_PUSHER_APP_KEY \
+    VITE_PUSHER_APP_CLUSTER=$VITE_PUSHER_APP_CLUSTER \
+    VITE_PUSHER_HOST=$VITE_PUSHER_HOST \
+    VITE_PUSHER_PORT=$VITE_PUSHER_PORT \
+    VITE_PUSHER_SCHEME=$VITE_PUSHER_SCHEME
+
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --no-audit --no-fund
+
 COPY resources ./resources
 COPY vite.config.js ./
 RUN npm run build
 
-FROM composer:2.8 AS vendor-builder
-WORKDIR /app
-COPY composer.json composer.lock ./
-RUN composer install --no-dev --prefer-dist --no-interaction --no-progress --optimize-autoloader
+# ============================================================
+# 2. Installation des dépendances PHP
+# ============================================================
+FROM composer:2.8 AS vendor
 
-FROM php:8.3-cli-alpine
+WORKDIR /app
+
+COPY composer.json composer.lock ./
+RUN composer install \
+    --no-dev \
+    --prefer-dist \
+    --no-interaction \
+    --no-progress \
+    --no-scripts \
+    --optimize-autoloader
+
+# ============================================================
+# 3. Image finale (PHP-FPM + extensions)
+# ============================================================
+FROM php:8.4-fpm-alpine AS app
+
 WORKDIR /var/www/html
 
-RUN apk add --no-cache \
-    bash \
-    icu-dev \
-    oniguruma-dev \
-    libzip-dev \
-    mysql-client \
-    zip \
-    unzip \
-    git \
-    && docker-php-ext-install pdo pdo_mysql mbstring intl zip
+# Dépendances système (persistantes) + build deps (temporaires)
+RUN set -eux; \
+    apk add --no-cache \
+        bash \
+        curl \
+        git \
+        mariadb-client \
+        libpng \
+        libzip \
+        icu-libs \
+        oniguruma \
+        shadow \
+        su-exec \
+        supervisor \
+        unzip \
+        zip; \
+    apk add --no-cache --virtual .build-deps \
+        $PHPIZE_DEPS \
+        icu-dev \
+        libpng-dev \
+        libzip-dev \
+        oniguruma-dev; \
+    docker-php-ext-install -j"$(nproc)" \
+        bcmath \
+        exif \
+        gd \
+        intl \
+        mbstring \
+        pcntl \
+        pdo_mysql \
+        zip; \
+    pecl install redis; \
+    docker-php-ext-enable redis; \
+    apk del --no-network --purge .build-deps; \
+    rm -rf /var/cache/apk/* /tmp/*
 
-COPY --from=vendor-builder /app/vendor ./vendor
-COPY . .
-COPY --from=frontend-builder /app/public/build ./public/build
+# Configuration PHP pour la prod (memory, upload)
+COPY docker/php/php.ini /usr/local/etc/php/conf.d/zz-app.ini
 
-RUN cp .env.example .env \
-    && php artisan key:generate --force \
-    && php artisan storage:link || true
+# Copie du code
+COPY . /var/www/html
+COPY --from=vendor /app/vendor /var/www/html/vendor
+COPY --from=frontend /app/public/build /var/www/html/public/build
 
-EXPOSE 8000
+# Double copie des assets publics dans /opt/public-dist
+# → permet à l'entrypoint de resynchroniser le volume app_public
+#   au démarrage (car le volume peut écraser /var/www/html/public)
+RUN cp -R /var/www/html/public /opt/public-dist
 
-CMD ["sh", "-c", "php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=8000"]
+# Entrypoint
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Utilisateur non-root (UID 1000 aligné avec un dev Linux courant)
+RUN addgroup -g 1000 app \
+    && adduser -D -u 1000 -G app -s /bin/bash app \
+    && chown -R app:app /var/www/html /opt/public-dist
+
+USER app
+
+EXPOSE 9000
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["php-fpm"]

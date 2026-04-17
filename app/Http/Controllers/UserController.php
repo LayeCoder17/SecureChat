@@ -18,10 +18,14 @@ class UserController extends Controller
         $user = $request->user();
         $query = $user->canCommunicateWith();
 
-        $results = $query->where(function ($q) use ($request) {
-            $q->where('name', 'ilike', '%' . $request->q . '%')
-                ->orWhere('email', 'ilike', '%' . $request->q . '%')
-                ->orWhere('poste', 'ilike', '%' . $request->q . '%');
+        $driver = \DB::connection()->getDriverName();
+        $likeOp = $driver === 'pgsql' ? 'ilike' : 'like';
+        $term = '%' . $request->q . '%';
+
+        $results = $query->where(function ($q) use ($term, $likeOp) {
+            $q->where('name', $likeOp, $term)
+                ->orWhere('email', $likeOp, $term)
+                ->orWhere('poste', $likeOp, $term);
         })
             ->limit(20)
             ->get(['id', 'name', 'email', 'avatar', 'status', 'last_seen_at', 'department_id', 'role', 'poste']);
@@ -79,5 +83,24 @@ class UserController extends Controller
         return response()->json($user->load('department')->only([
             'id', 'name', 'email', 'avatar', 'status', 'last_seen_at', 'department_id', 'role', 'poste', 'department',
         ]));
+    }
+
+    public function heartbeat(Request $request)
+    {
+        $user = $request->user();
+        $user->update([
+            'status' => 'online',
+            'last_seen_at' => now(),
+        ]);
+        return response()->json(['ok' => true, 'last_seen_at' => $user->last_seen_at]);
+    }
+
+    public function onlineUsers(Request $request)
+    {
+        $threshold = now()->subMinutes(2);
+        $users = \App\Models\User::where('last_seen_at', '>=', $threshold)
+            ->where('id', '!=', $request->user()->id)
+            ->pluck('id');
+        return response()->json($users);
     }
 }

@@ -1,73 +1,151 @@
-# SecureChat
+# SecureChat 💬
 
-Application de messagerie d'entreprise basee sur Laravel + React (Vite).
+> **Application de messagerie interne d'entreprise** — Laravel 12 + React 19 + Docker
+> Projet académique — Université de Thiès — 2026
 
-## Fonctionnalites principales
+---
 
-- Authentification (inscription / connexion / deconnexion) via token
-- Conversations privees et de groupe
-- Messagerie en temps reel (Echo + Pusher)
-- Gestion d'organigramme (departements, roles, recherche utilisateurs)
-- Interface amelioree avec bascule **mode clair/sombre**
+## ⚡ Démarrage (1 commande)
 
-## Stack technique
+```bash
+docker compose up --build -d
+```
 
-- Backend: Laravel 12, Sanctum, Broadcasting
-- Frontend: React 19, React Router, TailwindCSS 4, Vite
-- Base de donnees: MySQL (compose) ou SQLite (local)
+Puis ouvrir **http://localhost:8000**.
 
-## Lancement local (sans Docker)
+Tout est automatique : base de données, migrations, comptes de test, build du front.
+
+> 📘 **Évaluateur / Professeur** → lisez **[GUIDE.md](GUIDE.md)** : installation, comptes de test, parcours de test pas à pas.
+
+---
+
+## 🔐 Comptes de test (extrait)
+
+| Rôle | Email | Mot de passe |
+|------|-------|--------------|
+| 🛡️ Admin | `admin@securechat.com` | `admin12345` |
+| 👑 PDG | `pdg@securechat.com` | `password123` |
+| 👔 Directeur IT | `it@securechat.com` | `password123` |
+| 🧑‍💻 Employé (IT) | `mamadou@securechat.com` | `password123` |
+| 🧑‍💼 Employé (RH) | `abdou@securechat.com` | `password123` |
+
+👉 **Liste complète** : voir [GUIDE.md](GUIDE.md) ou `database/seeders/DepartmentSeeder.php`
+
+---
+
+## ✨ Fonctionnalités
+
+### 💬 Messagerie
+- Authentification sécurisée (Sanctum)
+- Conversations privées et de groupe
+- **Pièces jointes** (images, PDF, documents)
+- **Temps réel** par polling (messages 3 s, liste 5 s)
+- **Statut en ligne** (pastille verte)
+- Aperçu **style WhatsApp** (nom, heure, dernier message)
+- Recherche utilisateurs / filtres département & rôle
+- Notifications internes persistées
+
+### 🎨 Interface
+- **Mode sombre full black** (style Snapchat, #000 + violet #7c5cff)
+- **Mode clair doux** (#f5f5f7)
+- Préférence persistée (localStorage)
+
+### 🛡️ Administration (`/admin`)
+- **Dashboard** : KPI + graphique 7 jours + répartition rôles/départements
+- **Gestion utilisateurs** : CRUD complet
+- **Gestion départements** : hiérarchie, codes, membres
+- **Supervision conversations** : participants, dernier message, visualisation, suppression
+
+---
+
+## 🧱 Stack technique
+
+| Couche | Technologie |
+|--------|-------------|
+| Backend | Laravel 12, Sanctum, Eloquent |
+| Frontend | React 19, React Router, TailwindCSS 4, Vite |
+| Base de données | MySQL 8 |
+| Cache / Queue | Redis 7 |
+| Mail (dev) | Mailpit |
+| Conteneurs | Docker + Docker Compose |
+| Serveur web | Nginx 1.27 |
+
+---
+
+## 📁 Arborescence
+
+```
+securechat/
+├── app/Http/Controllers/   # Auth, Message, User, Admin, Notification
+├── app/Models/             # User, Department, Conversation, Message
+├── database/
+│   ├── migrations/         # Schéma complet
+│   └── seeders/            # Départements + 29 utilisateurs de test
+├── resources/
+│   ├── js/pages/           # Chat.jsx, Admin.jsx, Login.jsx
+│   ├── js/components/
+│   └── css/app.css         # Thèmes dark/light
+├── routes/api.php          # Endpoints REST
+├── docker/
+│   ├── entrypoint.sh       # Migrations + seeds auto
+│   ├── nginx/
+│   └── php/
+├── Dockerfile              # Multi-stage (front + PHP)
+├── docker-compose.yml      # 5 services
+├── GUIDE.md                # 📘 Guide évaluateur
+└── README.md
+```
+
+---
+
+## 🔌 Endpoints principaux
+
+### Auth
+- `POST /api/register` · `POST /api/login` · `POST /api/logout`
+
+### Messagerie
+- `GET /api/conversations`
+- `GET /api/conversations/{id}/messages`
+- `POST /api/conversations/{id}/messages` (avec fichiers)
+- `POST /api/user/heartbeat` · `GET /api/users/online`
+
+### Admin (rôle `admin` requis)
+- `GET /api/admin/stats`
+- `GET|POST|PUT|DELETE /api/admin/users`
+- `GET|POST|PUT|DELETE /api/admin/departments`
+- `GET|DELETE /api/admin/conversations`
+
+---
+
+## 🛠️ Démarrage sans Docker (développeurs)
 
 ```bash
 cp .env.example .env
 composer install
 npm install
 php artisan key:generate
-php artisan migrate
+php artisan migrate --seed
 npm run build
 php artisan serve
 ```
 
-## Lancement avec Docker
+---
 
-### Prerequis
-- Docker
-- Docker Compose plugin
-
-### Commandes
+## 🧪 Tests
 
 ```bash
-docker compose up --build
+docker compose exec app php artisan test
 ```
 
-L'application sera disponible sur:
-- [http://localhost:8000](http://localhost:8000)
+---
 
-La base MySQL est exposee sur `3307` (hote) -> `3306` (conteneur).
+## 👤 Auteur
 
-### Arreter
+**Abdoulaye Diallo** — Université de Thiès — 2026
+`abdoulaye.diallo6@univ-thies.sn`
 
-```bash
-docker compose down
-```
+---
 
-### Arreter et supprimer les volumes
+## 📄 Licence
 
-```bash
-docker compose down -v
-```
-
-## Build et tests
-
-```bash
-npm run build
-php artisan test
-```
-
-## Notes pour depot / rendu
-
-- Les fichiers de containerisation inclus:
-  - `Dockerfile`
-  - `docker-compose.yml`
-  - `.dockerignore`
-- Le theme clair/sombre est persiste en localStorage (`securechat-theme`)
+Projet académique — usage éducatif.

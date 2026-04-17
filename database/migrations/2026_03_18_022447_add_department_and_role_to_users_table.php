@@ -14,6 +14,7 @@ return new class extends Migration
         Schema::table('users', function (Blueprint $table) {
             $table->foreignId('department_id')->nullable()->constrained()->nullOnDelete();
             $table->enum('role', [
+                'admin',
                 'pdg',
                 'directeur',
                 'chef_service',
