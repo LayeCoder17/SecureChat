@@ -58,7 +58,7 @@ services:
       MAIL_PORT: 1025
 
       RUN_MIGRATIONS: "true"
-      RUN_SEEDERS: "false"
+      RUN_SEEDERS: "auto"
     volumes:
       - ./storage:/var/www/html/storage
       - app_public:/var/www/html/public
