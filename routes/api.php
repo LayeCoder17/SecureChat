@@ -8,6 +8,7 @@ use App\Http\Controllers\MessageController;
 use App\Http\Controllers\ChannelController;
 use App\Http\Controllers\AttachmentController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\AdminController;
 
 // Routes publiques
 Route::post('/auth/register', [AuthController::class, 'register']);
@@ -78,6 +79,21 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/channels/{channel}', [ChannelController::class, 'destroy']);
     Route::post('/channels/{channel}/join', [ChannelController::class, 'join']);
     Route::post('/channels/{channel}/leave', [ChannelController::class, 'leave']);
+
+    // ==================== ADMIN ====================
+    Route::middleware('admin')->prefix('admin')->group(function () {
+        Route::get('/stats',                         [AdminController::class, 'stats']);
+        // Départements
+        Route::get('/departments',                   [AdminController::class, 'listDepartments']);
+        Route::post('/departments',                  [AdminController::class, 'storeDepartment']);
+        Route::put('/departments/{department}',      [AdminController::class, 'updateDepartment']);
+        Route::delete('/departments/{department}',   [AdminController::class, 'destroyDepartment']);
+        // Utilisateurs
+        Route::get('/users',                         [AdminController::class, 'listUsers']);
+        Route::post('/users',                        [AdminController::class, 'storeUser']);
+        Route::put('/users/{user}',                  [AdminController::class, 'updateUser']);
+        Route::delete('/users/{user}',               [AdminController::class, 'destroyUser']);
+    });
 
     // Departments - filtré par hiérarchie
     Route::get('/departments', function (Request $request) {
