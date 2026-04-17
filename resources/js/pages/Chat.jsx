@@ -317,24 +317,21 @@ function Sidebar({ conversations, activeId, onSelect, onNewChat, onLogout, user,
                                     </div>
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-semibold truncate" style={{ color: 'var(--text)' }}>
-                                        {getConversationName(conv)}
-                                    </p>
-                                    <div className="flex items-center gap-1.5 mt-0.5">
-                                        {conv.last_message ? (
-                                            <>
-                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: conv.unread_count > 0 ? 'var(--primary)' : 'var(--text-subtle)' }}>
-                                                    <rect x="3" y="11" width="18" height="11" rx="2" />
-                                                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                                                </svg>
-                                                <span className="text-xs" style={{ color: 'var(--text-subtle)' }}>
-                                                    {new Date(conv.last_message.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                                                </span>
-                                            </>
-                                        ) : (
-                                            <span className="text-xs truncate" style={{ color: 'var(--text-subtle)' }}>{getConversationRole(conv) || 'Toucher pour discuter'}</span>
+                                    <div className="flex items-center justify-between gap-2">
+                                        <p className="text-sm font-semibold truncate" style={{ color: 'var(--text)' }}>
+                                            {getConversationName(conv)}
+                                        </p>
+                                        {conv.last_message && (
+                                            <span className="text-[10px] shrink-0" style={{ color: conv.unread_count > 0 ? 'var(--primary)' : 'var(--text-subtle)' }}>
+                                                {new Date(conv.last_message.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                                            </span>
                                         )}
                                     </div>
+                                    <p className="text-xs truncate mt-0.5" style={{ color: conv.unread_count > 0 ? 'var(--text)' : 'var(--text-muted)', fontWeight: conv.unread_count > 0 ? 500 : 400 }}>
+                                        {conv.last_message
+                                            ? (conv.last_message.user_id === user?.id ? 'Vous : ' : '') + (conv.last_message.encrypted_content || '📎 Pièce jointe')
+                                            : (getConversationRole(conv) || 'Toucher pour discuter')}
+                                    </p>
                                 </div>
                                 {conv.unread_count > 0 && (
                                     <span className="badge" style={{ background: 'var(--primary)' }}>
