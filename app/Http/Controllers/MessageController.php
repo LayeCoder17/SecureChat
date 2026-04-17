@@ -42,6 +42,26 @@ class MessageController extends Controller
 
         $message->load(['user', 'attachments']);
 
+        // Notifier les autres participants
+        $recipients = $conversation->users()
+            ->where('users.id', '!=', $request->user()->id)
+            ->pluck('users.id');
+
+        $preview = mb_substr($request->encrypted_content, 0, 80);
+        foreach ($recipients as $rid) {
+            \App\Models\Notification::create([
+                'user_id' => $rid,
+                'type' => 'message',
+                'title' => 'Nouveau message de ' . $request->user()->name,
+                'body' => $preview,
+                'data' => [
+                    'conversation_id' => $conversation->id,
+                    'message_id' => $message->id,
+                    'sender_id' => $request->user()->id,
+                ],
+            ]);
+        }
+
         event(new MessageSent($message));
 
         return response()->json($message, 201);
