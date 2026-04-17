@@ -41,10 +41,10 @@ export default function Admin() {
         setTimeout(() => setToast(null), 3000);
     };
 
-    const loadStats = () => api.get('/admin/stats').then((r) => setStats(r.data)).catch(console.error);
-    const loadUsers = () => api.get('/admin/users', { params: { q } }).then((r) => setUsers(r.data.data || r.data)).catch(console.error);
-    const loadDepts = () => api.get('/admin/departments').then((r) => setDepts(r.data)).catch(console.error);
-    const loadConvs = () => api.get('/admin/conversations', { params: { q } }).then((r) => setConvs(r.data.data || r.data)).catch(console.error);
+    const loadStats = () => api.get('/admin/stats').then((r) => setStats(r.data)).catch((e) => { console.error(e); setStats(null); });
+    const loadUsers = () => api.get('/admin/users', { params: { q } }).then((r) => setUsers(Array.isArray(r.data?.data) ? r.data.data : (Array.isArray(r.data) ? r.data : []))).catch((e) => { console.error(e); setUsers([]); });
+    const loadDepts = () => api.get('/admin/departments').then((r) => setDepts(Array.isArray(r.data) ? r.data : [])).catch((e) => { console.error(e); setDepts([]); });
+    const loadConvs = () => api.get('/admin/conversations', { params: { q } }).then((r) => setConvs(Array.isArray(r.data?.data) ? r.data.data : (Array.isArray(r.data) ? r.data : []))).catch((e) => { console.error(e); setConvs([]); });
 
     useEffect(() => {
         setLoading(true);
@@ -217,8 +217,11 @@ export default function Admin() {
    Dashboard
 ======================================================================== */
 function Dashboard({ stats }) {
-    if (!stats) return null;
-    const maxY = Math.max(1, ...stats.series.map((s) => s.total));
+    if (!stats) return <EmptyState icon={<IconGrid />} title="Statistiques indisponibles" />;
+    const series = Array.isArray(stats.series) ? stats.series : [];
+    const byDept = Array.isArray(stats.by_department) ? stats.by_department : [];
+    const byRole = stats.by_role || {};
+    const maxY = Math.max(1, ...series.map((s) => s.total || 0));
 
     return (
         <>
@@ -239,7 +242,7 @@ function Dashboard({ stats }) {
                         <span className="chip">{stats.messages_7d} messages</span>
                     </div>
                     <div className="chart">
-                        {stats.series.map((d, i) => (
+                        {series.map((d, i) => (
                             <div key={i} className="chart-bar-wrap">
                                 <div className="chart-value">{d.total}</div>
                                 <div className="chart-bar" style={{ height: `${(d.total / maxY) * 100}%` }} />
@@ -258,7 +261,7 @@ function Dashboard({ stats }) {
                     </div>
                     <div className="role-list">
                         {ROLES.map((r) => {
-                            const count = stats.by_role?.[r.v] || 0;
+                            const count = byRole[r.v] || 0;
                             const pct = stats.users ? (count / stats.users) * 100 : 0;
                             return (
                                 <div key={r.v} className="role-row">
@@ -283,7 +286,7 @@ function Dashboard({ stats }) {
                     </div>
                 </div>
                 <div className="dept-grid">
-                    {stats.by_department.map((d) => (
+                    {byDept.map((d) => (
                         <div key={d.code} className="dept-chip">
                             <div className="dept-chip-code">{d.code}</div>
                             <div className="dept-chip-name">{d.name}</div>
@@ -311,7 +314,8 @@ function StatCard({ label, value, trend, icon, color }) {
    Users
 ======================================================================== */
 function UsersList({ users, depts, onEdit, onDelete }) {
-    if (users.length === 0) {
+    const list = Array.isArray(users) ? users : [];
+    if (list.length === 0) {
         return <EmptyState icon={<IconUsers />} title="Aucun utilisateur" />;
     }
     return (
@@ -327,7 +331,7 @@ function UsersList({ users, depts, onEdit, onDelete }) {
                     </tr>
                 </thead>
                 <tbody>
-                    {users.map((u) => (
+                    {list.map((u) => (
                         <tr key={u.id}>
                             <td>
                                 <div className="user-cell">
@@ -359,10 +363,11 @@ function UsersList({ users, depts, onEdit, onDelete }) {
    Departments
 ======================================================================== */
 function DeptsList({ depts, onEdit, onDelete }) {
-    if (depts.length === 0) return <EmptyState icon={<IconBuilding />} title="Aucun département" />;
+    const list = Array.isArray(depts) ? depts : [];
+    if (list.length === 0) return <EmptyState icon={<IconBuilding />} title="Aucun département" />;
     return (
         <div className="cards-grid">
-            {depts.map((d) => (
+            {list.map((d) => (
                 <div key={d.id} className="card dept-card">
                     <div className="dept-card-head">
                         <div className="dept-card-icon">{d.code}</div>
@@ -390,7 +395,8 @@ function DeptsList({ depts, onEdit, onDelete }) {
    Conversations (qui parle à qui)
 ======================================================================== */
 function ConvsList({ convs, onView, onDelete }) {
-    if (convs.length === 0) return <EmptyState icon={<IconChat />} title="Aucune conversation" />;
+    const list = Array.isArray(convs) ? convs : [];
+    if (list.length === 0) return <EmptyState icon={<IconChat />} title="Aucune conversation" />;
     return (
         <div className="card table-card">
             <table className="data-table">
@@ -404,7 +410,7 @@ function ConvsList({ convs, onView, onDelete }) {
                     </tr>
                 </thead>
                 <tbody>
-                    {convs.map((c) => (
+                    {list.map((c) => (
                         <tr key={c.id}>
                             <td>
                                 <div className="participants">
