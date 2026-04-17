@@ -388,9 +388,16 @@ function MessageBubble({ message, isOwn }) {
                     </p>
                 )}
                 <div className={isOwn ? 'bubble-own' : 'bubble-other'}>
-                    <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                        {message.encrypted_content}
-                    </p>
+                    {message.encrypted_content && (
+                        <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                            {message.encrypted_content}
+                        </p>
+                    )}
+                    {message.attachments && message.attachments.length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: message.encrypted_content ? 8 : 0 }}>
+                            {message.attachments.map((att) => <AttachmentItem key={att.id} att={att} isOwn={isOwn} />)}
+                        </div>
+                    )}
                     <div className={`flex items-center gap-1.5 mt-1 ${isOwn ? 'justify-end' : ''}`}>
                         <span
                             className="text-[10px]"
@@ -419,6 +426,89 @@ function MessageBubble({ message, isOwn }) {
 }
 
 /* ============================================================
+   Attachment item
+   ============================================================ */
+
+function AttachmentItem({ att, isOwn }) {
+    const formatSize = (bytes) => {
+        if (!bytes) return '';
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    };
+    const isImage = att.mime_type && att.mime_type.startsWith('image/');
+    const downloadUrl = `/api/attachments/${att.id}/download`;
+    const token = localStorage.getItem('token');
+
+    const handleDownload = async (e) => {
+        e.preventDefault();
+        try {
+            const res = await fetch(downloadUrl, { headers: { Authorization: `Bearer ${token}` } });
+            if (!res.ok) throw new Error('Download failed');
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = att.original_name || att.filename || 'fichier';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const bg = isOwn ? 'rgba(255,255,255,0.18)' : 'var(--surface-muted, rgba(0,0,0,0.05))';
+    const textColor = isOwn ? '#fff' : 'var(--text)';
+    const subColor = isOwn ? 'rgba(255,255,255,0.75)' : 'var(--text-subtle)';
+
+    return (
+        <button
+            type="button"
+            onClick={handleDownload}
+            style={{
+                display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
+                background: bg, borderRadius: 10, border: 'none', cursor: 'pointer',
+                textAlign: 'left', width: '100%', color: textColor,
+            }}
+        >
+            <div style={{
+                width: 36, height: 36, borderRadius: 8,
+                background: isOwn ? 'rgba(255,255,255,0.2)' : 'var(--primary-soft, rgba(99,102,241,0.15))',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    {isImage ? (
+                        <>
+                            <rect x="3" y="3" width="18" height="18" rx="2" />
+                            <circle cx="8.5" cy="8.5" r="1.5" />
+                            <path d="M21 15l-5-5L5 21" />
+                        </>
+                    ) : (
+                        <>
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                        </>
+                    )}
+                </svg>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {att.original_name || att.filename || 'Fichier'}
+                </div>
+                <div style={{ fontSize: 11, color: subColor }}>{formatSize(att.size)}</div>
+            </div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.7 }}>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+        </button>
+    );
+}
+
+/* ============================================================
    Chat area
    ============================================================ */
 
@@ -427,7 +517,9 @@ function ChatArea({ conversation, user, onOpenSidebar }) {
     const [newMessage, setNewMessage] = useState('');
     const [loading, setLoading] = useState(false);
     const [sending, setSending] = useState(false);
+    const [pendingFiles, setPendingFiles] = useState([]);
     const messagesEndRef = useRef(null);
+    const fileInputRef = useRef(null);
 
     const getConversationName = () => {
         if (!conversation) return '';
@@ -466,14 +558,42 @@ function ChatArea({ conversation, user, onOpenSidebar }) {
 
     const sendMessage = async (e) => {
         e.preventDefault();
-        if (!newMessage.trim() || sending) return;
+        if ((!newMessage.trim() && pendingFiles.length === 0) || sending) return;
         setSending(true);
         try {
-            const res = await api.post(`/conversations/${conversation.id}/messages`, { encrypted_content: newMessage });
-            setMessages((prev) => [...prev, res.data]);
+            // 1. Créer le message (même vide si fichiers présents)
+            const res = await api.post(`/conversations/${conversation.id}/messages`, {
+                encrypted_content: newMessage || '',
+            });
+            const msg = res.data;
+
+            // 2. Uploader chaque fichier
+            if (pendingFiles.length > 0) {
+                const attachments = [];
+                for (const file of pendingFiles) {
+                    const fd = new FormData();
+                    fd.append('file', file);
+                    const r = await api.post(`/messages/${msg.id}/attachments`, fd, {
+                        headers: { 'Content-Type': 'multipart/form-data' },
+                    });
+                    attachments.push(r.data);
+                }
+                msg.attachments = attachments;
+            }
+
+            setMessages((prev) => [...prev, msg]);
             setNewMessage('');
-        } catch (err) { console.error(err); }
-        finally { setSending(false); }
+            setPendingFiles([]);
+        } catch (err) {
+            console.error(err);
+            alert(err?.response?.data?.message || 'Erreur lors de l\'envoi');
+        } finally { setSending(false); }
+    };
+
+    const handleFileChange = (e) => {
+        const files = Array.from(e.target.files || []);
+        setPendingFiles((prev) => [...prev, ...files]);
+        e.target.value = '';
     };
 
     if (!conversation) {
@@ -553,8 +673,32 @@ function ChatArea({ conversation, user, onOpenSidebar }) {
 
             {/* Input */}
             <div className="chat-input-bar">
+                {pendingFiles.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                        {pendingFiles.map((f, i) => (
+                            <div key={i} style={{
+                                display: 'flex', alignItems: 'center', gap: 6,
+                                padding: '6px 10px', background: 'var(--bg-elev)',
+                                borderRadius: 999, border: '1px solid var(--border)',
+                                fontSize: 12,
+                            }}>
+                                <span>📎</span>
+                                <span style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
+                                <button type="button" onClick={() => setPendingFiles((p) => p.filter((_, j) => j !== i))}
+                                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 16, lineHeight: 1 }}>×</button>
+                            </div>
+                        ))}
+                    </div>
+                )}
                 <form onSubmit={sendMessage} className="flex items-center gap-2">
-                    <button type="button" className="btn-icon" title="Joindre un fichier" aria-label="Joindre un fichier">
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        onChange={handleFileChange}
+                        style={{ display: 'none' }}
+                    />
+                    <button type="button" onClick={() => fileInputRef.current?.click()} className="btn-icon" title="Joindre un fichier" aria-label="Joindre un fichier">
                         <svg className="w-[1.1rem] h-[1.1rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
                         </svg>
@@ -569,13 +713,13 @@ function ChatArea({ conversation, user, onOpenSidebar }) {
                     />
                     <button
                         type="submit"
-                        disabled={!newMessage.trim() || sending}
+                        disabled={(!newMessage.trim() && pendingFiles.length === 0) || sending}
                         className="btn-icon"
                         style={{
-                            background: newMessage.trim() ? 'var(--grad-primary)' : 'var(--bg-elev)',
-                            borderColor: newMessage.trim() ? 'transparent' : 'var(--border)',
-                            color: newMessage.trim() ? '#fff' : 'var(--text-subtle)',
-                            boxShadow: newMessage.trim() ? 'var(--shadow-glow)' : 'none',
+                            background: (newMessage.trim() || pendingFiles.length > 0) ? 'var(--grad-primary)' : 'var(--bg-elev)',
+                            borderColor: (newMessage.trim() || pendingFiles.length > 0) ? 'transparent' : 'var(--border)',
+                            color: (newMessage.trim() || pendingFiles.length > 0) ? '#fff' : 'var(--text-subtle)',
+                            boxShadow: (newMessage.trim() || pendingFiles.length > 0) ? 'var(--shadow-glow)' : 'none',
                         }}
                         aria-label="Envoyer"
                     >
