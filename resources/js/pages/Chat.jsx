@@ -47,6 +47,117 @@ function roleGradient(role) {
    Sidebar
    ============================================================ */
 
+function NotificationBell({ onOpenConversation }) {
+    const [open, setOpen] = useState(false);
+    const [items, setItems] = useState([]);
+    const [unread, setUnread] = useState(0);
+    const ref = useRef(null);
+
+    const load = async () => {
+        try {
+            const r = await api.get('/notifications');
+            setItems(r.data.notifications || []);
+            setUnread(r.data.unread_count || 0);
+        } catch (e) {}
+    };
+
+    useEffect(() => {
+        load();
+        const id = setInterval(async () => {
+            try {
+                const r = await api.get('/notifications/unread-count');
+                setUnread(r.data.unread_count || 0);
+            } catch (e) {}
+        }, 20000);
+        const onClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+        document.addEventListener('mousedown', onClick);
+        return () => { clearInterval(id); document.removeEventListener('mousedown', onClick); };
+    }, []);
+
+    const handleToggle = async () => {
+        const next = !open;
+        setOpen(next);
+        if (next) await load();
+    };
+
+    const handleClick = async (n) => {
+        try { await api.post(`/notifications/${n.id}/read`); } catch (e) {}
+        setItems((prev) => prev.map((x) => x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x));
+        setUnread((u) => Math.max(0, u - (n.read_at ? 0 : 1)));
+        const convId = n.data?.conversation_id;
+        if (convId && onOpenConversation) onOpenConversation(convId);
+        setOpen(false);
+    };
+
+    const handleAllRead = async () => {
+        try { await api.post('/notifications/read-all'); } catch (e) {}
+        setItems((prev) => prev.map((x) => ({ ...x, read_at: x.read_at || new Date().toISOString() })));
+        setUnread(0);
+    };
+
+    const timeAgo = (iso) => {
+        if (!iso) return '';
+        const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+        if (s < 60) return `${s}s`;
+        if (s < 3600) return `${Math.floor(s / 60)}min`;
+        if (s < 86400) return `${Math.floor(s / 3600)}h`;
+        return `${Math.floor(s / 86400)}j`;
+    };
+
+    return (
+        <div ref={ref} style={{ position: 'relative' }}>
+            <button onClick={handleToggle} className="btn-icon" title="Notifications" aria-label="Notifications" style={{ position: 'relative' }}>
+                <svg className="w-[1.1rem] h-[1.1rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.17V11a6 6 0 10-12 0v3.17a2 2 0 01-.6 1.43L4 17h5m6 0a3 3 0 11-6 0" />
+                </svg>
+                {unread > 0 && (
+                    <span style={{
+                        position: 'absolute', top: -2, right: -2, minWidth: 16, height: 16,
+                        padding: '0 4px', borderRadius: 999, background: 'var(--danger, #ef4444)',
+                        color: '#fff', fontSize: 10, fontWeight: 700,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        border: '2px solid var(--bg)',
+                    }}>{unread > 99 ? '99+' : unread}</span>
+                )}
+            </button>
+            {open && (
+                <div style={{
+                    position: 'absolute', top: 'calc(100% + 8px)', right: 0, width: 340, maxHeight: 420,
+                    background: 'var(--panel, var(--bg-elev))', border: '1px solid var(--border)',
+                    borderRadius: 12, boxShadow: '0 10px 30px rgba(0,0,0,0.25)', zIndex: 50,
+                    display: 'flex', flexDirection: 'column', overflow: 'hidden',
+                }}>
+                    <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <strong style={{ fontSize: 14, color: 'var(--text)' }}>Notifications</strong>
+                        {unread > 0 && (
+                            <button onClick={handleAllRead} style={{ background: 'transparent', border: 'none', color: 'var(--primary)', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>Tout marquer lu</button>
+                        )}
+                    </div>
+                    <div style={{ flex: 1, overflowY: 'auto' }}>
+                        {items.length === 0 ? (
+                            <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-subtle)', fontSize: 13 }}>Aucune notification</div>
+                        ) : items.map((n) => (
+                            <button key={n.id} onClick={() => handleClick(n)} style={{
+                                display: 'block', width: '100%', textAlign: 'left',
+                                padding: '10px 14px', border: 'none', cursor: 'pointer',
+                                background: n.read_at ? 'transparent' : 'var(--primary-soft, rgba(99,102,241,0.08))',
+                                borderBottom: '1px solid var(--border)',
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                                    {!n.read_at && <span style={{ width: 8, height: 8, borderRadius: 999, background: 'var(--primary)' }} />}
+                                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.title}</span>
+                                    <span style={{ fontSize: 10, color: 'var(--text-subtle)' }}>{timeAgo(n.created_at)}</span>
+                                </div>
+                                {n.body && <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.body}</div>}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 function Sidebar({ conversations, activeId, onSelect, onNewChat, onLogout, user, view, setView, mobileOpen, onCloseMobile, onlineIds = [] }) {
     const isOnline = (id) => onlineIds.includes(id);
     const [search, setSearch] = useState('');
@@ -102,6 +213,7 @@ function Sidebar({ conversations, activeId, onSelect, onNewChat, onLogout, user,
                 <div className="flex items-center justify-between mb-3">
                     <h1 className="sidebar-brand">SecureChat</h1>
                     <div className="flex items-center gap-2">
+                        <NotificationBell onOpenConversation={(convId) => { onSelect(convId); setView('chats'); }} />
                         <ThemeToggle />
                         <button
                             onClick={onLogout}
