@@ -7,92 +7,89 @@
 :root {
     color-scheme: dark;
 
-    /* Surfaces */
-    --bg: #05070f;
-    --bg-soft: #0b1220;
-    --bg-elev: #0f172a;
-    --panel: rgba(15, 23, 42, 0.7);
-    --panel-solid: #0f172a;
-    --panel-hover: rgba(30, 41, 59, 0.6);
+    /* Surfaces — Snapchat-style true black */
+    --bg: #000000;
+    --bg-soft: #050505;
+    --bg-elev: #0a0a0a;
+    --panel: rgba(10, 10, 10, 0.85);
+    --panel-solid: #0a0a0a;
+    --panel-hover: rgba(24, 24, 24, 0.9);
 
     /* Text */
-    --text: #e2e8f0;
-    --text-strong: #f8fafc;
-    --text-muted: #94a3b8;
-    --text-subtle: #64748b;
+    --text: #ffffff;
+    --text-strong: #ffffff;
+    --text-muted: #a8a8a8;
+    --text-subtle: #6e6e6e;
 
-    /* Borders */
-    --border: rgba(148, 163, 184, 0.15);
-    --border-strong: rgba(148, 163, 184, 0.3);
+    /* Borders — subtle on pure black */
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.18);
 
-    /* Brand */
-    --primary: #6366f1;
-    --primary-hover: #818cf8;
-    --primary-soft: rgba(99, 102, 241, 0.15);
+    /* Brand — vivid accents pop on black */
+    --primary: #7c5cff;
+    --primary-hover: #9a82ff;
+    --primary-soft: rgba(124, 92, 255, 0.18);
     --accent: #22d3ee;
-    --accent-soft: rgba(34, 211, 238, 0.12);
+    --accent-soft: rgba(34, 211, 238, 0.15);
 
     /* Status */
     --success: #22c55e;
     --warning: #eab308;
     --danger: #ef4444;
-    --danger-soft: rgba(239, 68, 68, 0.1);
+    --danger-soft: rgba(239, 68, 68, 0.12);
 
     /* Role colors */
     --role-pdg: #f59e0b;
     --role-directeur: #06b6d4;
     --role-chef: #8b5cf6;
-    --role-employe: #64748b;
+    --role-employe: #9ca3af;
 
     /* Effects */
-    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
-    --shadow-md: 0 8px 24px rgba(2, 6, 23, 0.35);
-    --shadow-lg: 0 20px 50px rgba(2, 6, 23, 0.4);
-    --shadow-glow: 0 0 30px rgba(99, 102, 241, 0.25);
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.5);
+    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.6);
+    --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.75);
+    --shadow-glow: 0 0 30px rgba(124, 92, 255, 0.35);
 
     /* Gradients */
-    --grad-primary: linear-gradient(135deg, #6366f1, #22d3ee);
-    --grad-text: linear-gradient(135deg, #22d3ee, #818cf8);
-    --grad-bg: radial-gradient(ellipse at 20% 0%, rgba(99, 102, 241, 0.08), transparent 55%),
-               radial-gradient(ellipse at 80% 100%, rgba(34, 211, 238, 0.06), transparent 55%),
-               radial-gradient(circle at top, var(--bg-soft), var(--bg));
+    --grad-primary: linear-gradient(135deg, #7c5cff, #22d3ee);
+    --grad-text: linear-gradient(135deg, #22d3ee, #9a82ff);
+    --grad-bg: #000000;
 }
 
 [data-theme='light'] {
     color-scheme: light;
 
-    --bg: #f3f6fb;
-    --bg-soft: #e7edf7;
+    /* Surfaces — soft white, not glaring */
+    --bg: #f5f5f7;
+    --bg-soft: #ececef;
     --bg-elev: #ffffff;
-    --panel: rgba(255, 255, 255, 0.85);
+    --panel: rgba(255, 255, 255, 0.92);
     --panel-solid: #ffffff;
-    --panel-hover: rgba(241, 245, 249, 0.8);
+    --panel-hover: #f0f0f3;
 
-    --text: #0f172a;
-    --text-strong: #020617;
-    --text-muted: #475569;
-    --text-subtle: #64748b;
+    --text: #1a1a1f;
+    --text-strong: #0a0a0f;
+    --text-muted: #5a5a63;
+    --text-subtle: #8a8a93;
 
-    --border: rgba(71, 85, 105, 0.18);
-    --border-strong: rgba(71, 85, 105, 0.3);
+    --border: rgba(0, 0, 0, 0.08);
+    --border-strong: rgba(0, 0, 0, 0.16);
 
-    --primary: #4f46e5;
-    --primary-hover: #6366f1;
-    --primary-soft: rgba(79, 70, 229, 0.12);
+    --primary: #6d53ff;
+    --primary-hover: #5840e8;
+    --primary-soft: rgba(109, 83, 255, 0.12);
     --accent: #0891b2;
     --accent-soft: rgba(8, 145, 178, 0.12);
 
     --danger: #dc2626;
     --danger-soft: rgba(220, 38, 38, 0.1);
 
-    --shadow-sm: 0 2px 6px rgba(15, 23, 42, 0.06);
-    --shadow-md: 0 10px 30px rgba(15, 23, 42, 0.08);
-    --shadow-lg: 0 24px 50px rgba(15, 23, 42, 0.12);
-    --shadow-glow: 0 0 30px rgba(79, 70, 229, 0.15);
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04);
+    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 20px 40px rgba(0, 0, 0, 0.08);
+    --shadow-glow: 0 0 24px rgba(109, 83, 255, 0.18);
 
-    --grad-bg: radial-gradient(ellipse at 20% 0%, rgba(79, 70, 229, 0.08), transparent 55%),
-               radial-gradient(ellipse at 80% 100%, rgba(8, 145, 178, 0.06), transparent 55%),
-               radial-gradient(circle at top, var(--bg-soft), var(--bg));
+    --grad-bg: var(--bg);
 }
 
 /* ============================================================
