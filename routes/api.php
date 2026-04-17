@@ -103,6 +103,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/users',                        [AdminController::class, 'storeUser']);
         Route::put('/users/{user}',                  [AdminController::class, 'updateUser']);
         Route::delete('/users/{user}',               [AdminController::class, 'destroyUser']);
+
+        Route::get('/conversations',                 [AdminController::class, 'listConversations']);
+        Route::get('/conversations/{conversation}',  [AdminController::class, 'showConversation']);
+        Route::delete('/conversations/{conversation}', [AdminController::class, 'destroyConversation']);
     });
 
     // Departments - filtré par hiérarchie
