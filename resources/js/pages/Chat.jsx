@@ -213,7 +213,6 @@ function Sidebar({ conversations, activeId, onSelect, onNewChat, onLogout, user,
                 <div className="flex items-center justify-between mb-3">
                     <h1 className="sidebar-brand">SecureChat</h1>
                     <div className="flex items-center gap-2">
-                        <NotificationBell onOpenConversation={(convId) => { onSelect(convId); setView('chats'); }} />
                         <ThemeToggle />
                         <button
                             onClick={onLogout}
@@ -641,24 +640,51 @@ function ChatArea({ conversation, user, onOpenSidebar, onlineIds = [] }) {
 
     useEffect(() => {
         if (!conversation?.id) return;
+        let alive = true;
         setLoading(true);
         api.get(`/conversations/${conversation.id}/messages`)
             .then((res) => {
+                if (!alive) return;
                 const msgs = res.data.data?.reverse() || [];
                 setMessages(msgs);
                 const lastReceived = [...msgs].reverse().find((m) => m.user_id !== user?.id);
-                if (lastReceived) api.post(`/messages/${lastReceived.id}/read`).catch(console.error);
+                if (lastReceived) api.post(`/messages/${lastReceived.id}/read`).catch(() => {});
             })
             .catch(console.error)
-            .finally(() => setLoading(false));
+            .finally(() => { if (alive) setLoading(false); });
 
-        if (!echo) return;
-        const channel = echo.private(`conversation.${conversation.id}`);
-        channel.listen('MessageSent', (e) => {
-            if (e.message.user_id !== user?.id) setMessages((prev) => [...prev, e.message]);
-        });
+        // Polling: récupère les nouveaux messages toutes les 3s
+        const poll = async () => {
+            try {
+                const res = await api.get(`/conversations/${conversation.id}/messages`);
+                if (!alive) return;
+                const msgs = res.data.data?.reverse() || [];
+                setMessages((prev) => {
+                    if (msgs.length === prev.length && msgs[msgs.length - 1]?.id === prev[prev.length - 1]?.id) {
+                        return prev;
+                    }
+                    const lastReceived = [...msgs].reverse().find((m) => m.user_id !== user?.id);
+                    if (lastReceived && lastReceived.id !== prev[prev.length - 1]?.id) {
+                        api.post(`/messages/${lastReceived.id}/read`).catch(() => {});
+                    }
+                    return msgs;
+                });
+            } catch (e) {}
+        };
+        const pollId = setInterval(poll, 3000);
 
-        return () => echo && echo.leave(`conversation.${conversation.id}`);
+        if (echo) {
+            const channel = echo.private(`conversation.${conversation.id}`);
+            channel.listen('MessageSent', (e) => {
+                if (e.message.user_id !== user?.id) setMessages((prev) => [...prev, e.message]);
+            });
+        }
+
+        return () => {
+            alive = false;
+            clearInterval(pollId);
+            if (echo) echo.leave(`conversation.${conversation.id}`);
+        };
     }, [conversation?.id]);
 
     useEffect(() => {
@@ -869,6 +895,19 @@ function Chat() {
         const onFocus = () => ping();
         window.addEventListener('focus', onFocus);
         return () => { alive = false; clearInterval(id); window.removeEventListener('focus', onFocus); };
+    }, []);
+
+    // Polling liste conversations toutes les 5s pour détecter nouveaux messages
+    useEffect(() => {
+        let alive = true;
+        const fetchConvs = async () => {
+            try {
+                const res = await api.get('/conversations');
+                if (alive) setConversations(res.data);
+            } catch (e) {}
+        };
+        const id = setInterval(fetchConvs, 5000);
+        return () => { alive = false; clearInterval(id); };
     }, []);
 
     useEffect(() => {
