@@ -13,14 +13,72 @@ class AdminController extends Controller
     // ============== STATS ==============
     public function stats()
     {
+        $msgs24h = DB::table('messages')->where('created_at', '>=', now()->subDay())->count();
+        $msgs7d  = DB::table('messages')->where('created_at', '>=', now()->subDays(7))->count();
+        $convs   = DB::table('conversations')->count();
+        $activeUsers = User::where('last_seen_at', '>=', now()->subMinutes(5))->count();
+
+        // messages par jour (7 derniers jours)
+        $series = [];
+        for ($i = 6; $i >= 0; $i--) {
+            $day = now()->subDays($i)->startOfDay();
+            $next = (clone $day)->addDay();
+            $series[] = [
+                'date'  => $day->format('Y-m-d'),
+                'label' => $day->isoFormat('ddd'),
+                'total' => DB::table('messages')->whereBetween('created_at', [$day, $next])->count(),
+            ];
+        }
+
         return response()->json([
-            'users'       => User::count(),
-            'departments' => Department::count(),
+            'users'         => User::count(),
+            'active_users'  => $activeUsers,
+            'departments'   => Department::count(),
+            'conversations' => $convs,
+            'messages_24h'  => $msgs24h,
+            'messages_7d'   => $msgs7d,
+            'series'        => $series,
             'by_role'     => User::select('role', DB::raw('count(*) as total'))
                 ->groupBy('role')->pluck('total', 'role'),
             'by_department' => Department::withCount('members')->get()
                 ->map(fn($d) => ['name' => $d->name, 'code' => $d->code, 'total' => $d->members_count]),
         ]);
+    }
+
+    // ============== CONVERSATIONS (qui parle à qui) ==============
+    public function listConversations(Request $request)
+    {
+        $q = \App\Models\Conversation::with(['users:id,name,email,role,department_id', 'users.department:id,name,code'])
+            ->withCount('messages')
+            ->withMax('messages', 'created_at');
+
+        if ($s = $request->get('q')) {
+            $q->whereHas('users', function ($w) use ($s) {
+                $w->where('name', 'like', "%$s%")->orWhere('email', 'like', "%$s%");
+            });
+        }
+        if ($type = $request->get('type')) $q->where('type', $type);
+
+        return $q->orderByDesc('messages_max_created_at')->paginate(20);
+    }
+
+    public function showConversation(\App\Models\Conversation $conversation)
+    {
+        $conversation->load(['users:id,name,email,role,avatar', 'users.department:id,name,code']);
+        $messages = $conversation->messages()
+            ->with('user:id,name,role')
+            ->orderByDesc('created_at')->limit(50)->get();
+        return response()->json([
+            'conversation' => $conversation,
+            'messages'     => $messages,
+            'total_messages' => $conversation->messages()->count(),
+        ]);
+    }
+
+    public function destroyConversation(\App\Models\Conversation $conversation)
+    {
+        $conversation->delete();
+        return response()->json(['message' => 'Conversation supprimée']);
     }
 
     // ============== DEPARTMENTS ==============
