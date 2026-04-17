@@ -1,705 +1,776 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import axios from 'axios';
 import ThemeToggle from '../components/ThemeToggle';
 
 const api = axios.create({ baseURL: '/api' });
-api.interceptors.request.use((c) => {
-    const t = localStorage.getItem('token');
-    if (t) c.headers.Authorization = `Bearer ${t}`;
-    return c;
+api.interceptors.request.use((config) => {
+    const token = localStorage.getItem('token');
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+    return config;
 });
 
 const ROLES = [
-    { v: 'admin', l: 'Administrateur', color: '#8b5cf6' },
-    { v: 'pdg', l: 'PDG', color: '#f59e0b' },
-    { v: 'directeur', l: 'Directeur', color: '#3b82f6' },
-    { v: 'chef_service', l: 'Chef de Service', color: '#10b981' },
-    { v: 'employe', l: 'Employé', color: '#6b7280' },
+    { v: 'pdg',          l: 'PDG',              color: '#f59e0b' },
+    { v: 'directeur',    l: 'Directeur',        color: '#06b6d4' },
+    { v: 'chef_service', l: 'Chef de Service',  color: '#8b5cf6' },
+    { v: 'employe',      l: 'Employé',          color: '#9ca3af' },
+    { v: 'admin',        l: 'Administrateur',   color: '#7c5cff' },
 ];
-
 const roleLabel = (v) => ROLES.find((r) => r.v === v)?.l || v;
-const roleColor = (v) => ROLES.find((r) => r.v === v)?.color || '#6b7280';
+const roleColor = (v) => ROLES.find((r) => r.v === v)?.color || '#7c5cff';
+const getInitials = (n) => n?.split(' ').map((x) => x[0]).join('').substring(0, 2).toUpperCase() || '?';
 
+/* ========================================================================
+   Main Admin Shell
+======================================================================== */
 export default function Admin() {
     const [tab, setTab] = useState('dashboard');
     const [stats, setStats] = useState(null);
     const [users, setUsers] = useState([]);
     const [depts, setDepts] = useState([]);
+    const [convs, setConvs] = useState([]);
     const [q, setQ] = useState('');
     const [loading, setLoading] = useState(false);
     const [userModal, setUserModal] = useState(null);
     const [deptModal, setDeptModal] = useState(null);
-    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+    const [convModal, setConvModal] = useState(null);
+    const [toast, setToast] = useState(null);
 
-    const loadStats = () => api.get('/admin/stats').then((r) => setStats(r.data));
-    const loadUsers = () => api.get('/admin/users', { params: { q } }).then((r) => setUsers(r.data.data || r.data));
-    const loadDepts = () => api.get('/admin/departments').then((r) => setDepts(r.data));
+    const notify = (msg, type = 'ok') => {
+        setToast({ msg, type });
+        setTimeout(() => setToast(null), 3000);
+    };
+
+    const loadStats = () => api.get('/admin/stats').then((r) => setStats(r.data)).catch(console.error);
+    const loadUsers = () => api.get('/admin/users', { params: { q } }).then((r) => setUsers(r.data.data || r.data)).catch(console.error);
+    const loadDepts = () => api.get('/admin/departments').then((r) => setDepts(r.data)).catch(console.error);
+    const loadConvs = () => api.get('/admin/conversations', { params: { q } }).then((r) => setConvs(r.data.data || r.data)).catch(console.error);
 
     useEffect(() => {
-        loadStats().catch(handleErr);
-        loadDepts().catch(handleErr);
+        setLoading(true);
+        Promise.all([loadStats(), loadUsers(), loadDepts(), loadConvs()]).finally(() => setLoading(false));
     }, []);
 
     useEffect(() => {
-        if (tab === 'users') loadUsers();
-    }, [tab, q]);
+        const t = setTimeout(() => {
+            if (tab === 'users') loadUsers();
+            if (tab === 'conversations') loadConvs();
+        }, 200);
+        return () => clearTimeout(t);
+    }, [q]);
 
-    function handleErr(e) {
-        if (e?.response?.status === 401 || e?.response?.status === 403) {
-            alert(e?.response?.data?.message || 'Accès refusé');
-            window.location.href = '/login';
-        }
-    }
+    const handleLogout = async () => {
+        try { await api.post('/auth/logout'); } catch (e) {}
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+    };
 
     const saveUser = async (data) => {
-        setLoading(true);
         try {
             if (data.id) await api.put(`/admin/users/${data.id}`, data);
             else await api.post('/admin/users', data);
             setUserModal(null);
+            notify(data.id ? 'Utilisateur mis à jour' : 'Utilisateur créé');
             loadUsers(); loadStats();
         } catch (e) {
-            alert(e?.response?.data?.message || 'Erreur');
-        } finally { setLoading(false); }
+            notify(e?.response?.data?.message || 'Erreur', 'err');
+        }
     };
 
     const deleteUser = async (u) => {
         if (!confirm(`Supprimer ${u.name} ?`)) return;
         try {
             await api.delete(`/admin/users/${u.id}`);
+            notify('Utilisateur supprimé');
             loadUsers(); loadStats();
-        } catch (e) { alert(e?.response?.data?.message || 'Erreur'); }
+        } catch (e) { notify(e?.response?.data?.message || 'Erreur', 'err'); }
     };
 
     const saveDept = async (data) => {
-        setLoading(true);
         try {
             if (data.id) await api.put(`/admin/departments/${data.id}`, data);
             else await api.post('/admin/departments', data);
             setDeptModal(null);
+            notify(data.id ? 'Département mis à jour' : 'Département créé');
             loadDepts(); loadStats();
-        } catch (e) {
-            alert(e?.response?.data?.message || 'Erreur');
-        } finally { setLoading(false); }
+        } catch (e) { notify(e?.response?.data?.message || 'Erreur', 'err'); }
     };
 
     const deleteDept = async (d) => {
-        if (!confirm(`Supprimer ${d.name} ?`)) return;
+        if (!confirm(`Supprimer le département "${d.name}" ?`)) return;
         try {
             await api.delete(`/admin/departments/${d.id}`);
+            notify('Département supprimé');
             loadDepts(); loadStats();
-        } catch (e) { alert(e?.response?.data?.message || 'Erreur'); }
+        } catch (e) { notify(e?.response?.data?.message || 'Erreur', 'err'); }
     };
 
-    const logout = () => { localStorage.clear(); window.location.href = '/login'; };
+    const deleteConv = async (c) => {
+        if (!confirm('Supprimer cette conversation et tous ses messages ?')) return;
+        try {
+            await api.delete(`/admin/conversations/${c.id}`);
+            notify('Conversation supprimée');
+            loadConvs(); loadStats();
+        } catch (e) { notify(e?.response?.data?.message || 'Erreur', 'err'); }
+    };
 
     return (
-        <div style={wrapStyle}>
+        <div className="admin-shell">
             {/* Sidebar */}
-            <aside style={sidebarStyle}>
-                <div style={logoStyle}>
-                    <div style={logoIconStyle}>S</div>
+            <aside className="admin-sidebar">
+                <div className="admin-brand">
+                    <div className="admin-brand-logo">S</div>
                     <div>
-                        <div style={{ fontSize: 16, fontWeight: 700 }}>SecureChat</div>
-                        <div style={{ fontSize: 11, color: 'var(--muted)' }}>Console Admin</div>
+                        <div className="admin-brand-name">SecureChat</div>
+                        <div className="admin-brand-tag">Console Admin</div>
                     </div>
                 </div>
 
-                <nav style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, marginTop: 24 }}>
-                    <NavBtn active={tab === 'dashboard'} onClick={() => setTab('dashboard')} icon="📊" label="Dashboard" />
-                    <NavBtn active={tab === 'users'} onClick={() => setTab('users')} icon="👥" label="Utilisateurs" />
-                    <NavBtn active={tab === 'departments'} onClick={() => setTab('departments')} icon="🏢" label="Départements" />
+                <nav className="admin-nav">
+                    {[
+                        { id: 'dashboard',     label: 'Tableau de bord', icon: <IconGrid /> },
+                        { id: 'users',         label: 'Utilisateurs',    icon: <IconUsers />, count: stats?.users },
+                        { id: 'departments',   label: 'Départements',    icon: <IconBuilding />, count: stats?.departments },
+                        { id: 'conversations', label: 'Conversations',   icon: <IconChat />, count: stats?.conversations },
+                    ].map((t) => (
+                        <button key={t.id} onClick={() => setTab(t.id)} className={`admin-nav-item ${tab === t.id ? 'active' : ''}`}>
+                            <span className="admin-nav-icon">{t.icon}</span>
+                            <span className="admin-nav-label">{t.label}</span>
+                            {t.count !== undefined && <span className="admin-nav-count">{t.count}</span>}
+                        </button>
+                    ))}
                 </nav>
 
-                <div style={profileCardStyle}>
-                    <div style={avatarStyle}>{currentUser.name?.[0]?.toUpperCase() || 'A'}</div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {currentUser.name || 'Admin'}
-                        </div>
-                        <div style={{ fontSize: 11, color: 'var(--muted)' }}>Super Admin</div>
-                    </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <div className="admin-sidebar-footer">
                     <ThemeToggle />
-                    <button onClick={logout} style={logoutBtnStyle} title="Déconnexion">
-                        ⏻
+                    <button onClick={handleLogout} className="admin-logout" title="Déconnexion">
+                        <IconLogout /><span>Déconnexion</span>
                     </button>
                 </div>
             </aside>
 
             {/* Main */}
-            <main style={mainStyle}>
-                <header style={headerStyle}>
+            <main className="admin-main">
+                <header className="admin-header">
                     <div>
-                        <h1 style={{ margin: 0, fontSize: 28, fontWeight: 700 }}>
+                        <h1 className="admin-title">
                             {tab === 'dashboard' && 'Tableau de bord'}
-                            {tab === 'users' && 'Gestion des utilisateurs'}
-                            {tab === 'departments' && 'Gestion des départements'}
+                            {tab === 'users' && 'Utilisateurs'}
+                            {tab === 'departments' && 'Départements'}
+                            {tab === 'conversations' && 'Conversations'}
                         </h1>
-                        <p style={{ margin: '4px 0 0', color: 'var(--muted)', fontSize: 14 }}>
-                            {tab === 'dashboard' && `Bienvenue, ${currentUser.name?.split(' ')[0] || 'Admin'}`}
-                            {tab === 'users' && 'Créez, modifiez et supprimez les comptes utilisateurs'}
-                            {tab === 'departments' && 'Organisez la structure de votre entreprise'}
+                        <p className="admin-subtitle">
+                            {tab === 'dashboard' && "Vue d'ensemble de la plateforme"}
+                            {tab === 'users' && 'Gérer les comptes, rôles et affectations'}
+                            {tab === 'departments' && 'Structure organisationnelle'}
+                            {tab === 'conversations' && 'Surveillance des échanges'}
                         </p>
                     </div>
-                </header>
-
-                <div style={{ padding: 32 }}>
-                    {tab === 'dashboard' && <Dashboard stats={stats} />}
+                    {(tab === 'users' || tab === 'conversations') && (
+                        <div className="admin-search">
+                            <IconSearch />
+                            <input
+                                value={q}
+                                onChange={(e) => setQ(e.target.value)}
+                                placeholder={tab === 'users' ? 'Rechercher par nom, email, poste...' : 'Rechercher par participant...'}
+                            />
+                        </div>
+                    )}
                     {tab === 'users' && (
-                        <UsersTab users={users} q={q} setQ={setQ}
-                            onAdd={() => setUserModal({})}
-                            onEdit={(u) => setUserModal(u)}
-                            onDelete={deleteUser}
-                        />
+                        <button onClick={() => setUserModal({})} className="admin-btn-primary">
+                            <IconPlus /><span>Nouvel utilisateur</span>
+                        </button>
                     )}
                     {tab === 'departments' && (
-                        <DeptsTab depts={depts}
-                            onAdd={() => setDeptModal({})}
-                            onEdit={(d) => setDeptModal(d)}
-                            onDelete={deleteDept}
-                        />
+                        <button onClick={() => setDeptModal({})} className="admin-btn-primary">
+                            <IconPlus /><span>Nouveau département</span>
+                        </button>
                     )}
-                </div>
+                </header>
+
+                <section className="admin-content">
+                    {loading && !stats ? (
+                        <div className="admin-loading"><div className="spinner" /></div>
+                    ) : (
+                        <>
+                            {tab === 'dashboard'     && <Dashboard stats={stats} />}
+                            {tab === 'users'         && <UsersList users={users} depts={depts} onEdit={setUserModal} onDelete={deleteUser} />}
+                            {tab === 'departments'   && <DeptsList depts={depts} onEdit={setDeptModal} onDelete={deleteDept} />}
+                            {tab === 'conversations' && <ConvsList convs={convs} onView={setConvModal} onDelete={deleteConv} />}
+                        </>
+                    )}
+                </section>
             </main>
 
-            {userModal && <UserModal initial={userModal} depts={depts} onSave={saveUser} onClose={() => setUserModal(null)} loading={loading} />}
-            {deptModal && <DeptModal initial={deptModal} depts={depts} onSave={saveDept} onClose={() => setDeptModal(null)} loading={loading} />}
+            {userModal && <UserModal user={userModal} depts={depts} onClose={() => setUserModal(null)} onSave={saveUser} />}
+            {deptModal && <DeptModal dept={deptModal}   depts={depts} onClose={() => setDeptModal(null)} onSave={saveDept} />}
+            {convModal && <ConvModal conv={convModal}                 onClose={() => setConvModal(null)} />}
+            {toast && <div className={`admin-toast ${toast.type}`}>{toast.msg}</div>}
+
+            <AdminStyles />
         </div>
     );
 }
 
-// ============ COMPONENTS ============
-
-function NavBtn({ active, onClick, icon, label }) {
-    return (
-        <button onClick={onClick} style={{
-            ...navBtnStyle,
-            background: active ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : 'transparent',
-            color: active ? '#fff' : 'var(--text)',
-            boxShadow: active ? '0 4px 12px rgba(102, 126, 234, 0.35)' : 'none',
-        }}>
-            <span style={{ fontSize: 18 }}>{icon}</span>
-            <span>{label}</span>
-        </button>
-    );
-}
-
+/* ========================================================================
+   Dashboard
+======================================================================== */
 function Dashboard({ stats }) {
-    if (!stats) return <div style={{ color: 'var(--muted)' }}>Chargement…</div>;
-
-    const cards = [
-        { label: 'Utilisateurs totaux', value: stats.users, icon: '👥', gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' },
-        { label: 'Départements', value: stats.departments, icon: '🏢', gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)' },
-        { label: 'PDG / Direction', value: (stats.by_role?.pdg || 0) + (stats.by_role?.directeur || 0), icon: '👑', gradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)' },
-        { label: 'Chefs de service', value: stats.by_role?.chef_service || 0, icon: '📋', gradient: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)' },
-    ];
-
-    const roleData = [
-        { role: 'admin', total: stats.by_role?.admin || 0 },
-        { role: 'pdg', total: stats.by_role?.pdg || 0 },
-        { role: 'directeur', total: stats.by_role?.directeur || 0 },
-        { role: 'chef_service', total: stats.by_role?.chef_service || 0 },
-        { role: 'employe', total: stats.by_role?.employe || 0 },
-    ].filter((r) => r.total > 0);
-
-    const maxDept = Math.max(...(stats.by_department?.map((d) => d.total) || [1]));
+    if (!stats) return null;
+    const maxY = Math.max(1, ...stats.series.map((s) => s.total));
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-            {/* Grille cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
-                {cards.map((c) => (
-                    <div key={c.label} style={{
-                        padding: 24,
-                        background: c.gradient,
-                        borderRadius: 16,
-                        color: '#fff',
-                        position: 'relative',
-                        overflow: 'hidden',
-                        boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-                    }}>
-                        <div style={{ fontSize: 44, opacity: 0.9 }}>{c.icon}</div>
-                        <div style={{ fontSize: 36, fontWeight: 700, marginTop: 12 }}>{c.value}</div>
-                        <div style={{ fontSize: 13, opacity: 0.9, marginTop: 4 }}>{c.label}</div>
-                    </div>
-                ))}
+        <>
+            <div className="stats-grid">
+                <StatCard label="Utilisateurs"   value={stats.users}         trend={`${stats.active_users || 0} actifs`} icon={<IconUsers />}    color="#7c5cff" />
+                <StatCard label="Départements"   value={stats.departments}   trend="Structure org."                     icon={<IconBuilding />} color="#22d3ee" />
+                <StatCard label="Conversations"  value={stats.conversations} trend="Échanges privés + groupes"          icon={<IconChat />}     color="#f59e0b" />
+                <StatCard label="Messages 24 h"  value={stats.messages_24h}  trend={`${stats.messages_7d} sur 7 j`}     icon={<IconFlash />}    color="#22c55e" />
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 20 }}>
-                {/* Répartition par rôle */}
-                <div style={panelStyle}>
-                    <h3 style={panelTitleStyle}>Répartition par rôle</h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        {roleData.map((r) => {
-                            const pct = stats.users ? (r.total / stats.users) * 100 : 0;
+            <div className="grid-2col">
+                <div className="card">
+                    <div className="card-header">
+                        <div>
+                            <h3 className="card-title">Activité des messages</h3>
+                            <p className="card-subtitle">7 derniers jours</p>
+                        </div>
+                        <span className="chip">{stats.messages_7d} messages</span>
+                    </div>
+                    <div className="chart">
+                        {stats.series.map((d, i) => (
+                            <div key={i} className="chart-bar-wrap">
+                                <div className="chart-value">{d.total}</div>
+                                <div className="chart-bar" style={{ height: `${(d.total / maxY) * 100}%` }} />
+                                <div className="chart-label">{d.label}</div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="card">
+                    <div className="card-header">
+                        <div>
+                            <h3 className="card-title">Par rôle</h3>
+                            <p className="card-subtitle">Répartition des utilisateurs</p>
+                        </div>
+                    </div>
+                    <div className="role-list">
+                        {ROLES.map((r) => {
+                            const count = stats.by_role?.[r.v] || 0;
+                            const pct = stats.users ? (count / stats.users) * 100 : 0;
                             return (
-                                <div key={r.role}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
-                                        <span style={{ fontWeight: 600 }}>{roleLabel(r.role)}</span>
-                                        <span style={{ color: 'var(--muted)' }}>{r.total} · {pct.toFixed(0)}%</span>
+                                <div key={r.v} className="role-row">
+                                    <div className="role-row-top">
+                                        <span className="role-dot" style={{ background: r.color }} />
+                                        <span className="role-name">{r.l}</span>
+                                        <span className="role-count">{count}</span>
                                     </div>
-                                    <div style={{ height: 8, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
-                                        <div style={{
-                                            width: `${pct}%`,
-                                            height: '100%',
-                                            background: roleColor(r.role),
-                                            borderRadius: 4,
-                                            transition: 'width 0.6s ease',
-                                        }} />
-                                    </div>
+                                    <div className="role-bar"><div style={{ width: `${pct}%`, background: r.color }} /></div>
                                 </div>
                             );
                         })}
                     </div>
                 </div>
+            </div>
 
-                {/* Membres par département */}
-                <div style={panelStyle}>
-                    <h3 style={panelTitleStyle}>Effectifs par département</h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                        {stats.by_department?.map((d) => (
-                            <div key={d.code} style={{
-                                display: 'flex', alignItems: 'center', gap: 12,
-                                padding: 12, background: 'var(--bg)', borderRadius: 10,
-                            }}>
-                                <div style={{
-                                    width: 40, height: 40, borderRadius: 10,
-                                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    color: '#fff', fontWeight: 700, fontSize: 12,
-                                }}>
-                                    {d.code}
-                                </div>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</div>
-                                    <div style={{ marginTop: 4, height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
-                                        <div style={{
-                                            width: `${(d.total / maxDept) * 100}%`,
-                                            height: '100%', background: '#667eea', borderRadius: 2,
-                                        }} />
+            <div className="card">
+                <div className="card-header">
+                    <div>
+                        <h3 className="card-title">Départements</h3>
+                        <p className="card-subtitle">Effectifs par unité</p>
+                    </div>
+                </div>
+                <div className="dept-grid">
+                    {stats.by_department.map((d) => (
+                        <div key={d.code} className="dept-chip">
+                            <div className="dept-chip-code">{d.code}</div>
+                            <div className="dept-chip-name">{d.name}</div>
+                            <div className="dept-chip-count">{d.total} membres</div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </>
+    );
+}
+
+function StatCard({ label, value, trend, icon, color }) {
+    return (
+        <div className="stat-card">
+            <div className="stat-icon" style={{ background: `${color}20`, color }}>{icon}</div>
+            <div className="stat-value">{value ?? 0}</div>
+            <div className="stat-label">{label}</div>
+            <div className="stat-trend">{trend}</div>
+        </div>
+    );
+}
+
+/* ========================================================================
+   Users
+======================================================================== */
+function UsersList({ users, depts, onEdit, onDelete }) {
+    if (users.length === 0) {
+        return <EmptyState icon={<IconUsers />} title="Aucun utilisateur" />;
+    }
+    return (
+        <div className="card table-card">
+            <table className="data-table">
+                <thead>
+                    <tr>
+                        <th>Utilisateur</th>
+                        <th>Rôle</th>
+                        <th>Département</th>
+                        <th>Poste</th>
+                        <th style={{ textAlign: 'right' }}>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {users.map((u) => (
+                        <tr key={u.id}>
+                            <td>
+                                <div className="user-cell">
+                                    <div className="avatar" style={{ background: `linear-gradient(135deg, ${roleColor(u.role)}, #7c5cff)` }}>
+                                        {getInitials(u.name)}
+                                    </div>
+                                    <div>
+                                        <div className="user-name">{u.name}</div>
+                                        <div className="user-email">{u.email}</div>
                                     </div>
                                 </div>
-                                <div style={{ fontWeight: 700, fontSize: 15 }}>{d.total}</div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            </div>
+                            </td>
+                            <td><span className="role-badge" style={{ color: roleColor(u.role), background: `${roleColor(u.role)}18` }}>{roleLabel(u.role)}</span></td>
+                            <td className="td-muted">{u.department?.name || '—'}</td>
+                            <td className="td-muted">{u.poste || '—'}</td>
+                            <td style={{ textAlign: 'right' }}>
+                                <button className="icon-btn" onClick={() => onEdit(u)} title="Modifier"><IconEdit /></button>
+                                <button className="icon-btn danger" onClick={() => onDelete(u)} title="Supprimer"><IconTrash /></button>
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
         </div>
     );
 }
 
-function UsersTab({ users, q, setQ, onAdd, onEdit, onDelete }) {
+/* ========================================================================
+   Departments
+======================================================================== */
+function DeptsList({ depts, onEdit, onDelete }) {
+    if (depts.length === 0) return <EmptyState icon={<IconBuilding />} title="Aucun département" />;
     return (
-        <div>
-            <div style={toolbarStyle}>
-                <div style={{ position: 'relative', flex: 1, maxWidth: 420 }}>
-                    <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)' }}>🔍</span>
-                    <input
-                        placeholder="Rechercher un utilisateur…"
-                        value={q}
-                        onChange={(e) => setQ(e.target.value)}
-                        style={{ ...searchInputStyle, paddingLeft: 40 }}
-                    />
-                </div>
-                <button onClick={onAdd} style={primaryBtnStyle}>
-                    <span>+</span> Nouvel utilisateur
-                </button>
-            </div>
-
-            <div style={panelStyle}>
-                {users.length === 0 ? (
-                    <div style={emptyStyle}>
-                        <div style={{ fontSize: 48 }}>🔍</div>
-                        <div style={{ marginTop: 12, color: 'var(--muted)' }}>Aucun utilisateur trouvé</div>
+        <div className="cards-grid">
+            {depts.map((d) => (
+                <div key={d.id} className="card dept-card">
+                    <div className="dept-card-head">
+                        <div className="dept-card-icon">{d.code}</div>
+                        <div style={{ flex: 1 }}>
+                            <div className="dept-card-name">{d.name}</div>
+                            {d.parent && <div className="td-muted" style={{ fontSize: 12 }}>↳ sous-dépt de {d.parent.name}</div>}
+                        </div>
                     </div>
-                ) : (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
-                        {users.map((u) => (
-                            <div key={u.id} style={userCardStyle}>
-                                <div style={{
-                                    width: 48, height: 48, borderRadius: 12,
-                                    background: `linear-gradient(135deg, ${roleColor(u.role)}, ${roleColor(u.role)}bb)`,
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    color: '#fff', fontWeight: 700, fontSize: 18, flexShrink: 0,
-                                }}>
-                                    {u.name?.[0]?.toUpperCase()}
-                                </div>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name}</div>
-                                    <div style={{ fontSize: 12, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
-                                    <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-                                        <span style={{ ...chipStyle, background: `${roleColor(u.role)}22`, color: roleColor(u.role) }}>
-                                            {roleLabel(u.role)}
-                                        </span>
-                                        {u.department && <span style={chipStyle}>{u.department.code}</span>}
+                    {d.description && <p className="dept-card-desc">{d.description}</p>}
+                    <div className="dept-card-meta">
+                        <span className="chip"><IconUsers /> {d.members_count || 0} membres</span>
+                        <span className="chip">Niveau {d.level}</span>
+                    </div>
+                    <div className="dept-card-actions">
+                        <button className="btn-ghost" onClick={() => onEdit(d)}><IconEdit /> Modifier</button>
+                        <button className="btn-ghost danger" onClick={() => onDelete(d)}><IconTrash /> Supprimer</button>
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+/* ========================================================================
+   Conversations (qui parle à qui)
+======================================================================== */
+function ConvsList({ convs, onView, onDelete }) {
+    if (convs.length === 0) return <EmptyState icon={<IconChat />} title="Aucune conversation" />;
+    return (
+        <div className="card table-card">
+            <table className="data-table">
+                <thead>
+                    <tr>
+                        <th>Participants</th>
+                        <th>Type</th>
+                        <th>Messages</th>
+                        <th>Dernier échange</th>
+                        <th style={{ textAlign: 'right' }}>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {convs.map((c) => (
+                        <tr key={c.id}>
+                            <td>
+                                <div className="participants">
+                                    {(c.users || []).slice(0, 4).map((u) => (
+                                        <div key={u.id} className="avatar avatar-sm stack" style={{ background: `linear-gradient(135deg, ${roleColor(u.role)}, #7c5cff)` }} title={u.name}>
+                                            {getInitials(u.name)}
+                                        </div>
+                                    ))}
+                                    {(c.users?.length || 0) > 4 && <div className="avatar avatar-sm stack plus">+{c.users.length - 4}</div>}
+                                    <div className="participants-names">
+                                        {(c.users || []).map((u) => u.name).join(' · ')}
                                     </div>
                                 </div>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                    <button onClick={() => onEdit(u)} style={iconBtnStyle} title="Modifier">✏️</button>
-                                    <button onClick={() => onDelete(u)} style={{ ...iconBtnStyle, color: '#ef4444' }} title="Supprimer">🗑️</button>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </div>
+                            </td>
+                            <td><span className="chip">{c.type === 'group' ? 'Groupe' : 'Privée'}</span></td>
+                            <td className="td-muted">{c.messages_count || 0}</td>
+                            <td className="td-muted">{c.messages_max_created_at ? new Date(c.messages_max_created_at).toLocaleString('fr-FR') : '—'}</td>
+                            <td style={{ textAlign: 'right' }}>
+                                <button className="icon-btn" onClick={() => onView(c)} title="Consulter"><IconEye /></button>
+                                <button className="icon-btn danger" onClick={() => onDelete(c)} title="Supprimer"><IconTrash /></button>
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
         </div>
     );
 }
 
-function DeptsTab({ depts, onAdd, onEdit, onDelete }) {
-    return (
-        <div>
-            <div style={toolbarStyle}>
-                <div style={{ flex: 1, color: 'var(--muted)', fontSize: 14 }}>
-                    {depts.length} département{depts.length > 1 ? 's' : ''}
-                </div>
-                <button onClick={onAdd} style={primaryBtnStyle}>
-                    <span>+</span> Nouveau département
-                </button>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
-                {depts.map((d) => (
-                    <div key={d.id} style={deptCardStyle}>
-                        <div style={{
-                            height: 70,
-                            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            fontSize: 28, fontWeight: 800, color: '#fff',
-                        }}>
-                            {d.code}
-                        </div>
-                        <div style={{ padding: 16 }}>
-                            <div style={{ fontWeight: 700, fontSize: 15 }}>{d.name}</div>
-                            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4, minHeight: 32 }}>
-                                {d.description || 'Aucune description'}
-                            </div>
-                            <div style={{ display: 'flex', gap: 8, marginTop: 12, fontSize: 12 }}>
-                                <span style={chipStyle}>Niveau {d.level}</span>
-                                <span style={chipStyle}>{d.members_count || 0} membres</span>
-                                {d.parent && <span style={chipStyle}>↳ {d.parent.code}</span>}
-                            </div>
-                            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-                                <button onClick={() => onEdit(d)} style={{ ...secondaryBtnStyle, flex: 1 }}>Modifier</button>
-                                <button onClick={() => onDelete(d)} style={{ ...iconBtnStyle, color: '#ef4444', padding: '8px 12px' }}>🗑️</button>
-                            </div>
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-}
-
-function UserModal({ initial, depts, onSave, onClose, loading }) {
+/* ========================================================================
+   Modals
+======================================================================== */
+function UserModal({ user, depts, onClose, onSave }) {
     const [f, setF] = useState({
-        id: initial.id,
-        name: initial.name || '',
-        email: initial.email || '',
+        name: user.name || '',
+        email: user.email || '',
         password: '',
-        role: initial.role || 'employe',
-        department_id: initial.department_id || '',
-        poste: initial.poste || '',
+        role: user.role || 'employe',
+        department_id: user.department_id || '',
+        poste: user.poste || '',
     });
+    const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
     const submit = (e) => {
         e.preventDefault();
-        const data = { ...f };
+        const data = { ...f, id: user.id };
         if (!data.password) delete data.password;
         if (!data.department_id) data.department_id = null;
         onSave(data);
     };
     return (
-        <Modal onClose={onClose} title={initial.id ? 'Modifier utilisateur' : 'Nouvel utilisateur'} icon="👤">
-            <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <Field label="Nom complet">
-                    <input style={inputStyle} required value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+        <Modal onClose={onClose} title={user.id ? 'Modifier utilisateur' : 'Nouvel utilisateur'}>
+            <form onSubmit={submit} className="form">
+                <Field label="Nom complet"><input className="inp" value={f.name} onChange={set('name')} required /></Field>
+                <Field label="Email"><input className="inp" type="email" value={f.email} onChange={set('email')} required /></Field>
+                <Field label={user.id ? 'Nouveau mot de passe (optionnel)' : 'Mot de passe'}>
+                    <input className="inp" type="password" value={f.password} onChange={set('password')} required={!user.id} minLength={8} />
                 </Field>
-                <Field label="Email">
-                    <input style={inputStyle} type="email" required value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
-                </Field>
-                <Field label={initial.id ? 'Nouveau mot de passe (optionnel)' : 'Mot de passe'}>
-                    <input style={inputStyle} type="password" required={!initial.id} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />
-                </Field>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="row2">
                     <Field label="Rôle">
-                        <select style={inputStyle} value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>
+                        <select className="inp" value={f.role} onChange={set('role')}>
                             {ROLES.map((r) => <option key={r.v} value={r.v}>{r.l}</option>)}
                         </select>
                     </Field>
                     <Field label="Département">
-                        <select style={inputStyle} value={f.department_id || ''} onChange={(e) => setF({ ...f, department_id: e.target.value })}>
+                        <select className="inp" value={f.department_id} onChange={set('department_id')}>
                             <option value="">Aucun</option>
                             {depts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                         </select>
                     </Field>
                 </div>
-                <Field label="Poste (optionnel)">
-                    <input style={inputStyle} value={f.poste} onChange={(e) => setF({ ...f, poste: e.target.value })} />
-                </Field>
-                <ModalFooter onClose={onClose} loading={loading} />
+                <Field label="Poste"><input className="inp" value={f.poste} onChange={set('poste')} /></Field>
+                <div className="form-actions">
+                    <button type="button" className="btn-ghost" onClick={onClose}>Annuler</button>
+                    <button type="submit" className="admin-btn-primary">{user.id ? 'Enregistrer' : 'Créer'}</button>
+                </div>
             </form>
         </Modal>
     );
 }
 
-function DeptModal({ initial, depts, onSave, onClose, loading }) {
+function DeptModal({ dept, depts, onClose, onSave }) {
     const [f, setF] = useState({
-        id: initial.id,
-        name: initial.name || '',
-        code: initial.code || '',
-        description: initial.description || '',
-        parent_id: initial.parent_id || '',
-        level: initial.level ?? 1,
+        name: dept.name || '',
+        code: dept.code || '',
+        description: dept.description || '',
+        parent_id: dept.parent_id || '',
+        level: dept.level ?? 0,
     });
+    const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
     const submit = (e) => {
         e.preventDefault();
-        const data = { ...f };
+        const data = { ...f, id: dept.id };
         if (!data.parent_id) data.parent_id = null;
+        data.level = Number(data.level) || 0;
         onSave(data);
     };
     return (
-        <Modal onClose={onClose} title={initial.id ? 'Modifier département' : 'Nouveau département'} icon="🏢">
-            <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
-                    <Field label="Nom">
-                        <input style={inputStyle} required value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
-                    </Field>
-                    <Field label="Code">
-                        <input style={inputStyle} required value={f.code} onChange={(e) => setF({ ...f, code: e.target.value.toUpperCase() })} />
-                    </Field>
+        <Modal onClose={onClose} title={dept.id ? 'Modifier département' : 'Nouveau département'}>
+            <form onSubmit={submit} className="form">
+                <div className="row2">
+                    <Field label="Nom"><input className="inp" value={f.name} onChange={set('name')} required /></Field>
+                    <Field label="Code"><input className="inp" value={f.code} onChange={set('code')} required style={{ textTransform: 'uppercase' }} /></Field>
                 </div>
                 <Field label="Description">
-                    <textarea style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
+                    <textarea className="inp" rows={3} value={f.description} onChange={set('description')} />
                 </Field>
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
+                <div className="row2">
                     <Field label="Département parent">
-                        <select style={inputStyle} value={f.parent_id || ''} onChange={(e) => setF({ ...f, parent_id: e.target.value })}>
+                        <select className="inp" value={f.parent_id} onChange={set('parent_id')}>
                             <option value="">Aucun (racine)</option>
-                            {depts.filter((d) => d.id !== initial.id).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                            {depts.filter((d) => d.id !== dept.id).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                         </select>
                     </Field>
-                    <Field label="Niveau">
-                        <input style={inputStyle} type="number" min="0" value={f.level} onChange={(e) => setF({ ...f, level: Number(e.target.value) })} />
-                    </Field>
+                    <Field label="Niveau"><input className="inp" type="number" min={0} value={f.level} onChange={set('level')} /></Field>
                 </div>
-                <ModalFooter onClose={onClose} loading={loading} />
+                <div className="form-actions">
+                    <button type="button" className="btn-ghost" onClick={onClose}>Annuler</button>
+                    <button type="submit" className="admin-btn-primary">{dept.id ? 'Enregistrer' : 'Créer'}</button>
+                </div>
             </form>
         </Modal>
     );
 }
 
-function Field({ label, children }) {
+function ConvModal({ conv, onClose }) {
+    const [data, setData] = useState(null);
+    useEffect(() => {
+        api.get(`/admin/conversations/${conv.id}`).then((r) => setData(r.data)).catch(console.error);
+    }, [conv.id]);
     return (
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>{label}</span>
-            {children}
-        </label>
+        <Modal onClose={onClose} title="Consultation de la conversation" large>
+            {!data ? <div className="admin-loading"><div className="spinner" /></div> : (
+                <>
+                    <div className="conv-head">
+                        <div className="conv-head-participants">
+                            {data.conversation.users.map((u) => (
+                                <div key={u.id} className="conv-participant">
+                                    <div className="avatar avatar-sm" style={{ background: `linear-gradient(135deg, ${roleColor(u.role)}, #7c5cff)` }}>{getInitials(u.name)}</div>
+                                    <div>
+                                        <div className="user-name">{u.name}</div>
+                                        <div className="td-muted" style={{ fontSize: 11 }}>{roleLabel(u.role)} · {u.department?.name || '—'}</div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <span className="chip">{data.total_messages} messages</span>
+                    </div>
+                    <div className="conv-msgs">
+                        {data.messages.length === 0 ? <div className="td-muted" style={{ textAlign: 'center', padding: 24 }}>Aucun message</div> :
+                            [...data.messages].reverse().map((m) => (
+                                <div key={m.id} className="conv-msg">
+                                    <div className="avatar avatar-sm" style={{ background: `linear-gradient(135deg, ${roleColor(m.user?.role)}, #7c5cff)` }}>{getInitials(m.user?.name)}</div>
+                                    <div className="conv-msg-body">
+                                        <div className="conv-msg-meta">
+                                            <span style={{ color: roleColor(m.user?.role), fontWeight: 600 }}>{m.user?.name}</span>
+                                            <span className="td-muted">{new Date(m.created_at).toLocaleString('fr-FR')}</span>
+                                        </div>
+                                        <div className="conv-msg-text">{m.encrypted_content}</div>
+                                    </div>
+                                </div>
+                            ))}
+                    </div>
+                    <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--text-subtle)', borderTop: '1px solid var(--border)' }}>
+                        ⚠ Accès admin : consultation à des fins de supervision uniquement.
+                    </div>
+                </>
+            )}
+        </Modal>
     );
 }
 
-function Modal({ children, title, icon, onClose }) {
+function Modal({ children, onClose, title, large }) {
+    useEffect(() => {
+        const onKey = (e) => e.key === 'Escape' && onClose();
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, []);
     return (
-        <div onClick={onClose} style={modalOverlayStyle}>
-            <div onClick={(e) => e.stopPropagation()} style={modalStyle}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-                    <div style={{
-                        width: 44, height: 44, borderRadius: 12,
-                        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 22,
-                    }}>{icon}</div>
-                    <h3 style={{ margin: 0, flex: 1, fontSize: 18 }}>{title}</h3>
-                    <button onClick={onClose} style={closeBtnStyle}>×</button>
+        <div className="modal-backdrop" onClick={onClose}>
+            <div className={`modal ${large ? 'modal-lg' : ''}`} onClick={(e) => e.stopPropagation()}>
+                <div className="modal-head">
+                    <h2>{title}</h2>
+                    <button onClick={onClose} className="icon-btn"><IconClose /></button>
                 </div>
-                {children}
+                <div className="modal-body">{children}</div>
             </div>
         </div>
     );
 }
 
-function ModalFooter({ onClose, loading }) {
+function Field({ label, children }) {
+    return <label className="field"><span>{label}</span>{children}</label>;
+}
+
+function EmptyState({ icon, title }) {
     return (
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
-            <button type="button" onClick={onClose} style={secondaryBtnStyle}>Annuler</button>
-            <button type="submit" disabled={loading} style={primaryBtnStyle}>
-                {loading ? '…' : 'Enregistrer'}
-            </button>
+        <div className="empty">
+            <div className="empty-icon">{icon}</div>
+            <p>{title}</p>
         </div>
     );
 }
 
-// ============ STYLES ============
+/* ========================================================================
+   Icons
+======================================================================== */
+const I = (p) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p} />;
+const IconGrid     = () => <I><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /></I>;
+const IconUsers    = () => <I><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></I>;
+const IconBuilding = () => <I><rect x="4" y="2" width="16" height="20" rx="2" /><path d="M9 22v-4h6v4" /><path d="M8 6h.01M16 6h.01M12 6h.01M8 10h.01M16 10h.01M12 10h.01M8 14h.01M16 14h.01M12 14h.01" /></I>;
+const IconChat     = () => <I><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></I>;
+const IconFlash    = () => <I><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></I>;
+const IconSearch   = () => <I><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></I>;
+const IconPlus     = () => <I><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></I>;
+const IconEdit     = () => <I><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></I>;
+const IconTrash    = () => <I><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></I>;
+const IconEye      = () => <I><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></I>;
+const IconClose    = () => <I><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></I>;
+const IconLogout   = () => <I><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></I>;
 
-const wrapStyle = {
-    display: 'flex',
-    minHeight: '100vh',
-    background: 'var(--bg)',
-    color: 'var(--text)',
-    fontFamily: 'Inter, system-ui, sans-serif',
-};
+/* ========================================================================
+   Styles
+======================================================================== */
+function AdminStyles() {
+    return (
+        <style>{`
+.admin-shell { display: flex; min-height: 100vh; background: var(--bg); color: var(--text); }
+.admin-sidebar { width: 260px; background: var(--bg-elev); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 24px 16px; position: sticky; top: 0; height: 100vh; }
+.admin-brand { display: flex; align-items: center; gap: 12px; padding: 0 8px 20px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+.admin-brand-logo { width: 40px; height: 40px; border-radius: 12px; background: var(--grad-primary); display: flex; align-items: center; justify-content: center; font-weight: 800; color: #fff; font-size: 18px; }
+.admin-brand-name { font-weight: 700; font-size: 15px; }
+.admin-brand-tag { font-size: 11px; color: var(--text-subtle); }
+.admin-nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.admin-nav-item { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border-radius: 10px; background: transparent; border: none; color: var(--text-muted); cursor: pointer; text-align: left; font-size: 14px; transition: all 0.15s; }
+.admin-nav-item:hover { background: var(--panel-hover); color: var(--text); }
+.admin-nav-item.active { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
+.admin-nav-icon { display: flex; }
+.admin-nav-label { flex: 1; }
+.admin-nav-count { font-size: 11px; padding: 2px 8px; background: var(--border); border-radius: 999px; color: var(--text-muted); font-weight: 600; }
+.admin-nav-item.active .admin-nav-count { background: var(--primary); color: #fff; }
+.admin-sidebar-footer { border-top: 1px solid var(--border); padding-top: 12px; display: flex; align-items: center; gap: 8px; }
+.admin-logout { flex: 1; display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: 10px; background: transparent; border: 1px solid var(--border); color: var(--text-muted); cursor: pointer; font-size: 13px; }
+.admin-logout:hover { color: var(--danger); border-color: var(--danger); }
 
-const sidebarStyle = {
-    width: 250,
-    background: 'var(--surface)',
-    borderRight: '1px solid var(--border)',
-    padding: 20,
-    display: 'flex',
-    flexDirection: 'column',
-    position: 'sticky',
-    top: 0,
-    height: '100vh',
-};
+.admin-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.admin-header { display: flex; align-items: center; gap: 16px; padding: 24px 32px; border-bottom: 1px solid var(--border); background: var(--bg); position: sticky; top: 0; z-index: 10; }
+.admin-title { font-size: 22px; font-weight: 700; margin: 0; }
+.admin-subtitle { font-size: 13px; color: var(--text-muted); margin: 2px 0 0; }
+.admin-search { flex: 1; max-width: 400px; margin-left: auto; display: flex; align-items: center; gap: 8px; padding: 8px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); }
+.admin-search svg { color: var(--text-subtle); }
+.admin-search input { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font-size: 14px; }
+.admin-btn-primary { display: inline-flex; align-items: center; gap: 8px; padding: 9px 16px; border-radius: 10px; background: var(--primary); color: #fff; border: none; font-weight: 600; cursor: pointer; font-size: 13px; transition: all 0.15s; white-space: nowrap; }
+.admin-btn-primary:hover { background: var(--primary-hover); transform: translateY(-1px); box-shadow: var(--shadow-glow); }
 
-const logoStyle = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 12,
-    paddingBottom: 20,
-    borderBottom: '1px solid var(--border)',
-};
+.admin-content { padding: 24px 32px; display: flex; flex-direction: column; gap: 24px; flex: 1; }
+.admin-loading { display: flex; justify-content: center; padding: 60px; }
 
-const logoIconStyle = {
-    width: 40, height: 40, borderRadius: 10,
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    color: '#fff', fontWeight: 800, fontSize: 20,
-    boxShadow: '0 4px 12px rgba(102,126,234,0.35)',
-};
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+.stat-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
+.stat-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 14px; }
+.stat-value { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; }
+.stat-label { font-size: 13px; color: var(--text-muted); font-weight: 500; margin-top: 2px; }
+.stat-trend { font-size: 11px; color: var(--text-subtle); margin-top: 8px; }
 
-const navBtnStyle = {
-    display: 'flex', alignItems: 'center', gap: 12,
-    padding: '12px 14px', borderRadius: 10, border: 'none',
-    cursor: 'pointer', fontSize: 14, fontWeight: 600,
-    textAlign: 'left', transition: 'all 0.2s',
-};
+.grid-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 900px) { .grid-2col { grid-template-columns: 1fr; } .admin-sidebar { display: none; } }
 
-const profileCardStyle = {
-    display: 'flex', alignItems: 'center', gap: 10,
-    padding: 12, background: 'var(--bg)', borderRadius: 10,
-    border: '1px solid var(--border)',
-};
+.card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
+.card-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 18px; }
+.card-title { font-size: 15px; font-weight: 700; margin: 0; }
+.card-subtitle { font-size: 12px; color: var(--text-subtle); margin: 2px 0 0; }
 
-const avatarStyle = {
-    width: 36, height: 36, borderRadius: 10,
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    color: '#fff', fontWeight: 700, flexShrink: 0,
-};
+.chart { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; height: 180px; padding-top: 20px; }
+.chart-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; }
+.chart-value { font-size: 11px; color: var(--text-muted); font-weight: 600; }
+.chart-bar { width: 100%; max-width: 32px; background: var(--grad-primary); border-radius: 6px 6px 0 0; min-height: 4px; transition: all 0.3s; }
+.chart-label { font-size: 11px; color: var(--text-subtle); text-transform: capitalize; }
 
-const logoutBtnStyle = {
-    flex: 1, padding: '8px', borderRadius: 8,
-    background: 'var(--bg)', border: '1px solid var(--border)',
-    cursor: 'pointer', color: 'var(--text)', fontSize: 16,
-};
+.role-list { display: flex; flex-direction: column; gap: 14px; }
+.role-row-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; }
+.role-dot { width: 8px; height: 8px; border-radius: 999px; }
+.role-name { flex: 1; font-weight: 500; }
+.role-count { font-weight: 700; font-size: 13px; }
+.role-bar { height: 6px; background: var(--border); border-radius: 999px; overflow: hidden; }
+.role-bar > div { height: 100%; border-radius: 999px; transition: width 0.4s; }
 
-const mainStyle = { flex: 1, minWidth: 0 };
+.dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.dept-chip { padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); }
+.dept-chip-code { font-size: 11px; color: var(--primary); font-weight: 700; letter-spacing: 0.05em; }
+.dept-chip-name { font-weight: 600; font-size: 14px; margin-top: 2px; }
+.dept-chip-count { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
 
-const headerStyle = {
-    padding: '24px 32px',
-    borderBottom: '1px solid var(--border)',
-    background: 'var(--surface)',
-};
+.cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.dept-card { display: flex; flex-direction: column; gap: 12px; }
+.dept-card-head { display: flex; align-items: center; gap: 12px; }
+.dept-card-icon { width: 44px; height: 44px; border-radius: 12px; background: var(--primary-soft); color: var(--primary); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; letter-spacing: 0.04em; }
+.dept-card-name { font-weight: 700; font-size: 15px; }
+.dept-card-desc { font-size: 13px; color: var(--text-muted); margin: 0; }
+.dept-card-meta { display: flex; gap: 6px; flex-wrap: wrap; }
+.dept-card-actions { display: flex; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 
-const panelStyle = {
-    background: 'var(--surface)',
-    border: '1px solid var(--border)',
-    borderRadius: 16,
-    padding: 20,
-};
+.table-card { padding: 0; overflow: hidden; }
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th { text-align: left; padding: 14px 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-subtle); border-bottom: 1px solid var(--border); background: var(--bg); }
+.data-table td { padding: 14px 20px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tr:hover { background: var(--panel-hover); }
 
-const panelTitleStyle = { margin: '0 0 16px', fontSize: 15, fontWeight: 700 };
+.user-cell { display: flex; align-items: center; gap: 12px; }
+.user-name { font-weight: 600; color: var(--text); }
+.user-email { font-size: 12px; color: var(--text-muted); }
+.td-muted { color: var(--text-muted); }
 
-const toolbarStyle = {
-    display: 'flex', alignItems: 'center', gap: 12,
-    marginBottom: 20, flexWrap: 'wrap',
-};
+.avatar { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 13px; flex-shrink: 0; }
+.avatar.avatar-sm { width: 28px; height: 28px; font-size: 11px; border-radius: 8px; }
 
-const searchInputStyle = {
-    width: '100%', padding: '10px 14px',
-    borderRadius: 10, border: '1px solid var(--border)',
-    background: 'var(--surface)', color: 'var(--text)',
-    fontSize: 14, outline: 'none',
-};
+.role-badge { padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
 
-const inputStyle = {
-    padding: '10px 12px', borderRadius: 8,
-    border: '1px solid var(--border)',
-    background: 'var(--bg)', color: 'var(--text)',
-    fontSize: 14, outline: 'none', width: '100%',
-};
+.icon-btn { width: 32px; height: 32px; border-radius: 8px; background: transparent; border: 1px solid var(--border); color: var(--text-muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 6px; transition: all 0.15s; }
+.icon-btn:hover { background: var(--panel-hover); color: var(--text); }
+.icon-btn.danger:hover { color: var(--danger); border-color: var(--danger); }
 
-const primaryBtnStyle = {
-    display: 'inline-flex', alignItems: 'center', gap: 6,
-    padding: '10px 18px', borderRadius: 10, border: 'none',
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    color: '#fff', fontWeight: 600, fontSize: 14, cursor: 'pointer',
-    boxShadow: '0 4px 12px rgba(102,126,234,0.3)',
-};
+.btn-ghost { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 8px; background: transparent; border: 1px solid var(--border); color: var(--text-muted); cursor: pointer; font-size: 12px; font-weight: 500; }
+.btn-ghost:hover { background: var(--panel-hover); color: var(--text); }
+.btn-ghost.danger:hover { color: var(--danger); border-color: var(--danger); }
 
-const secondaryBtnStyle = {
-    padding: '10px 16px', borderRadius: 10,
-    border: '1px solid var(--border)',
-    background: 'transparent', color: 'var(--text)',
-    fontWeight: 600, fontSize: 14, cursor: 'pointer',
-};
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 999px; font-size: 11px; color: var(--text-muted); background: var(--border); font-weight: 500; }
 
-const iconBtnStyle = {
-    padding: '6px 10px', borderRadius: 8,
-    border: '1px solid var(--border)',
-    background: 'transparent', color: 'var(--text)',
-    cursor: 'pointer', fontSize: 14,
-};
+.participants { display: flex; align-items: center; gap: 8px; }
+.avatar.stack { border: 2px solid var(--bg-elev); margin-left: -10px; }
+.avatar.stack:first-child { margin-left: 0; }
+.avatar.stack.plus { background: var(--border); color: var(--text-muted); font-size: 10px; }
+.participants-names { font-size: 13px; font-weight: 500; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px; }
 
-const userCardStyle = {
-    display: 'flex', alignItems: 'center', gap: 12,
-    padding: 14, background: 'var(--surface)',
-    border: '1px solid var(--border)', borderRadius: 12,
-    transition: 'all 0.2s',
-};
+.empty { padding: 60px 20px; text-align: center; color: var(--text-muted); }
+.empty-icon { display: inline-flex; padding: 16px; background: var(--bg-elev); border-radius: 16px; margin-bottom: 12px; color: var(--text-subtle); }
 
-const deptCardStyle = {
-    background: 'var(--surface)',
-    border: '1px solid var(--border)',
-    borderRadius: 14, overflow: 'hidden',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
-};
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
+.modal { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 16px; width: 100%; max-width: 520px; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: var(--shadow-lg); }
+.modal-lg { max-width: 760px; }
+.modal-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid var(--border); }
+.modal-head h2 { font-size: 16px; font-weight: 700; margin: 0; }
+.modal-body { padding: 20px 24px; overflow-y: auto; }
 
-const chipStyle = {
-    padding: '3px 10px', borderRadius: 20,
-    background: 'var(--bg)', color: 'var(--text)',
-    fontSize: 11, fontWeight: 600,
-    border: '1px solid var(--border)',
-    whiteSpace: 'nowrap',
-};
+.form { display: flex; flex-direction: column; gap: 14px; }
+.field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-muted); font-weight: 500; }
+.inp { padding: 10px 12px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); color: var(--text); font-size: 14px; font-family: inherit; outline: none; }
+.inp:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.form-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); margin-top: 8px; }
 
-const emptyStyle = {
-    padding: 48, textAlign: 'center',
-};
+.conv-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+.conv-head-participants { display: flex; gap: 16px; flex-wrap: wrap; }
+.conv-participant { display: flex; align-items: center; gap: 8px; }
+.conv-msgs { max-height: 55vh; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 4px; }
+.conv-msg { display: flex; gap: 10px; }
+.conv-msg-body { flex: 1; min-width: 0; }
+.conv-msg-meta { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 2px; }
+.conv-msg-text { padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; font-size: 13px; white-space: pre-wrap; word-break: break-word; }
 
-const modalOverlayStyle = {
-    position: 'fixed', inset: 0,
-    background: 'rgba(0,0,0,0.6)',
-    backdropFilter: 'blur(4px)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    zIndex: 1000, padding: 16,
-};
+.spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--primary); border-radius: 999px; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
-const modalStyle = {
-    background: 'var(--surface)', borderRadius: 16, padding: 28,
-    maxWidth: 520, width: '100%',
-    border: '1px solid var(--border)',
-    boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
-    maxHeight: '90vh', overflowY: 'auto',
-};
-
-const closeBtnStyle = {
-    width: 32, height: 32, borderRadius: 8,
-    background: 'var(--bg)', border: '1px solid var(--border)',
-    color: 'var(--text)', fontSize: 20, cursor: 'pointer',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-};
+.admin-toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 18px; border-radius: 10px; background: var(--bg-elev); border: 1px solid var(--border); color: var(--text); font-size: 13px; font-weight: 500; z-index: 200; box-shadow: var(--shadow-lg); animation: slideUp 0.2s; }
+.admin-toast.err { border-color: var(--danger); color: var(--danger); }
+@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } }
+        `}</style>
+    );
+}
