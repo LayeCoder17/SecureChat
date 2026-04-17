@@ -84,4 +84,23 @@ class UserController extends Controller
             'id', 'name', 'email', 'avatar', 'status', 'last_seen_at', 'department_id', 'role', 'poste', 'department',
         ]));
     }
+
+    public function heartbeat(Request $request)
+    {
+        $user = $request->user();
+        $user->update([
+            'status' => 'online',
+            'last_seen_at' => now(),
+        ]);
+        return response()->json(['ok' => true, 'last_seen_at' => $user->last_seen_at]);
+    }
+
+    public function onlineUsers(Request $request)
+    {
+        $threshold = now()->subMinutes(2);
+        $users = \App\Models\User::where('last_seen_at', '>=', $threshold)
+            ->where('id', '!=', $request->user()->id)
+            ->pluck('id');
+        return response()->json($users);
+    }
 }
