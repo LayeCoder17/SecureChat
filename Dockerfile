@@ -92,6 +92,11 @@ COPY . /var/www/html
 COPY --from=vendor /app/vendor /var/www/html/vendor
 COPY --from=frontend /app/public/build /var/www/html/public/build
 
+# Double copie des assets publics dans /opt/public-dist
+# → permet à l'entrypoint de resynchroniser le volume app_public
+#   au démarrage (car le volume peut écraser /var/www/html/public)
+RUN cp -R /var/www/html/public /opt/public-dist
+
 # Entrypoint
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
@@ -99,7 +104,7 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 # Utilisateur non-root (UID 1000 aligné avec un dev Linux courant)
 RUN addgroup -g 1000 app \
     && adduser -D -u 1000 -G app -s /bin/bash app \
-    && chown -R app:app /var/www/html
+    && chown -R app:app /var/www/html /opt/public-dist
 
 USER app
 
