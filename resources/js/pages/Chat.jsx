@@ -320,9 +320,25 @@ function Sidebar({ conversations, activeId, onSelect, onNewChat, onLogout, user,
                                     <p className="text-sm font-semibold truncate" style={{ color: 'var(--text)' }}>
                                         {getConversationName(conv)}
                                     </p>
-                                    <p className="text-xs truncate mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                                        {conv.last_message?.encrypted_content || getConversationRole(conv) || 'Aucun message'}
-                                    </p>
+                                    <div className="flex items-center gap-1.5 mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                                        {conv.last_message ? (
+                                            <>
+                                                {/* Icône cadenas = message chiffré */}
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: 'var(--primary)' }}>
+                                                    <rect x="3" y="11" width="18" height="11" rx="2" />
+                                                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                                                </svg>
+                                                <span className="text-xs truncate" style={{ fontWeight: conv.unread_count > 0 ? 600 : 400, color: conv.unread_count > 0 ? 'var(--text)' : 'var(--text-muted)' }}>
+                                                    {conv.last_message.user_id === user?.id ? 'Envoyé' : 'Nouveau message'}
+                                                </span>
+                                                <span className="text-xs" style={{ color: 'var(--text-subtle)', marginLeft: 'auto', flexShrink: 0 }}>
+                                                    · {new Date(conv.last_message.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                                                </span>
+                                            </>
+                                        ) : (
+                                            <span className="text-xs truncate" style={{ color: 'var(--text-subtle)' }}>{getConversationRole(conv) || 'Toucher pour discuter'}</span>
+                                        )}
+                                    </div>
                                 </div>
                                 {conv.unread_count > 0 && (
                                     <span className="badge" style={{ background: 'var(--primary)' }}>
