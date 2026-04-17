@@ -13,38 +13,8 @@ api.interceptors.request.use((config) => {
     return config;
 });
 
-const PUSHER_KEY = import.meta.env.VITE_PUSHER_APP_KEY || 'securechat-key';
-const PUSHER_HOST = import.meta.env.VITE_PUSHER_HOST || window.location.hostname;
-const PUSHER_PORT = Number(import.meta.env.VITE_PUSHER_PORT || 6001);
-const PUSHER_SCHEME = import.meta.env.VITE_PUSHER_SCHEME || 'http';
-const PUSHER_CLUSTER = import.meta.env.VITE_PUSHER_APP_CLUSTER || 'mt1';
-
-let echo = null;
-try {
-    echo = new Echo({
-        broadcaster: 'pusher',
-        key: PUSHER_KEY,
-        cluster: PUSHER_CLUSTER,
-        wsHost: PUSHER_HOST,
-        wsPort: PUSHER_PORT,
-        wssPort: PUSHER_PORT,
-        forceTLS: PUSHER_SCHEME === 'https',
-        enabledTransports: ['ws', 'wss'],
-        disableStats: true,
-        authorizer: (channel) => ({
-            authorize: (socketId, callback) => {
-                api.post('/broadcasting/auth', {
-                    socket_id: socketId,
-                    channel_name: channel.name,
-                })
-                    .then((res) => callback(null, res.data))
-                    .catch((err) => callback(err));
-            },
-        }),
-    });
-} catch (e) {
-    console.warn('[Echo] Initialisation échouée, temps réel désactivé:', e);
-}
+// Temps réel désactivé pour éviter les erreurs WS (sera réactivé en phase 3)
+const echo = null;
 
 const ROLE_LABELS = {
     pdg: 'PDG',
