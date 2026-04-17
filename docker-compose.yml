@@ -1,0 +1,49 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: securechat_app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_NAME: SecureChat
+      APP_ENV: local
+      APP_DEBUG: "true"
+      APP_URL: http://localhost:8000
+      DB_CONNECTION: mysql
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_DATABASE: securechat
+      DB_USERNAME: securechat
+      DB_PASSWORD: securechat
+      SESSION_DRIVER: file
+      CACHE_STORE: file
+      QUEUE_CONNECTION: sync
+      BROADCAST_CONNECTION: log
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/var/www/html
+
+  db:
+    image: mysql:8.0
+    container_name: securechat_db
+    environment:
+      MYSQL_DATABASE: securechat
+      MYSQL_USER: securechat
+      MYSQL_PASSWORD: securechat
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mysql_data:
