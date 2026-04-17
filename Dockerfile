@@ -33,7 +33,7 @@ RUN composer install \
 # ============================================================
 # 3. Image finale (PHP-FPM + extensions)
 # ============================================================
-FROM php:8.3-fpm-alpine AS app
+FROM php:8.4-fpm-alpine AS app
 
 WORKDIR /var/www/html
 
