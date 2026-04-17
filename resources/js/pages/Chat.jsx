@@ -47,7 +47,8 @@ function roleGradient(role) {
    Sidebar
    ============================================================ */
 
-function Sidebar({ conversations, activeId, onSelect, onNewChat, onLogout, user, view, setView, mobileOpen, onCloseMobile }) {
+function Sidebar({ conversations, activeId, onSelect, onNewChat, onLogout, user, view, setView, mobileOpen, onCloseMobile, onlineIds = [] }) {
+    const isOnline = (id) => onlineIds.includes(id);
     const [search, setSearch] = useState('');
     const [searchResults, setSearchResults] = useState([]);
     const [departments, setDepartments] = useState([]);
@@ -279,11 +280,7 @@ function Sidebar({ conversations, activeId, onSelect, onNewChat, onLogout, user,
                                                                     {getInitials(m.name)}
                                                                 </div>
                                                                 <span
-                                                                    className={`status-dot ${
-                                                                        m.status === 'online' ? 'status-online'
-                                                                            : m.status === 'away' ? 'status-away'
-                                                                                : 'status-offline'
-                                                                    }`}
+                                                                    className={`status-dot ${isOnline(m.id) ? 'status-online' : 'status-offline'}`}
                                                                 />
                                                             </div>
                                                             <div className="flex-1 min-w-0 text-left">
@@ -512,7 +509,7 @@ function AttachmentItem({ att, isOwn }) {
    Chat area
    ============================================================ */
 
-function ChatArea({ conversation, user, onOpenSidebar }) {
+function ChatArea({ conversation, user, onOpenSidebar, onlineIds = [] }) {
     const [messages, setMessages] = useState([]);
     const [newMessage, setNewMessage] = useState('');
     const [loading, setLoading] = useState(false);
@@ -630,14 +627,14 @@ function ChatArea({ conversation, user, onOpenSidebar }) {
                     <div className="avatar" style={{ background: roleGradient(other?.role) }}>
                         {getInitials(getConversationName())}
                     </div>
-                    <span className="status-dot status-online" />
+                    <span className={`status-dot ${other && onlineIds.includes(other.id) ? 'status-online' : 'status-offline'}`} />
                 </div>
                 <div className="flex-1 min-w-0">
                     <h2 className="text-sm font-bold truncate" style={{ color: 'var(--text)' }}>
                         {getConversationName()}
                     </h2>
                     <p className="text-xs truncate" style={{ color: ROLE_COLORS[other?.role] || 'var(--text-muted)' }}>
-                        {other?.poste || 'En ligne'}
+                        {other && onlineIds.includes(other.id) ? 'En ligne' : (other?.poste || 'Hors ligne')}
                     </p>
                 </div>
                 <div className="hidden sm:flex items-center gap-2">
@@ -743,6 +740,24 @@ function Chat() {
     const [user, setUser] = useState(null);
     const [view, setView] = useState('chats');
     const [mobileOpen, setMobileOpen] = useState(false);
+    const [onlineIds, setOnlineIds] = useState([]);
+
+    // Heartbeat + online polling
+    useEffect(() => {
+        let alive = true;
+        const ping = async () => {
+            try { await api.post('/user/heartbeat'); } catch (e) {}
+            try {
+                const r = await api.get('/users/online');
+                if (alive) setOnlineIds(r.data || []);
+            } catch (e) {}
+        };
+        ping();
+        const id = setInterval(ping, 30000);
+        const onFocus = () => ping();
+        window.addEventListener('focus', onFocus);
+        return () => { alive = false; clearInterval(id); window.removeEventListener('focus', onFocus); };
+    }, []);
 
     useEffect(() => {
         api.get('/user/profile').then((res) => {
@@ -821,6 +836,7 @@ function Chat() {
                 setView={setView}
                 mobileOpen={mobileOpen}
                 onCloseMobile={() => setMobileOpen(false)}
+                onlineIds={onlineIds}
             />
 
             {mobileOpen && <div className="chat-backdrop" onClick={() => setMobileOpen(false)} />}
@@ -829,6 +845,7 @@ function Chat() {
                 conversation={activeConversation}
                 user={user}
                 onOpenSidebar={() => setMobileOpen(true)}
+                onlineIds={onlineIds}
             />
         </div>
     );
