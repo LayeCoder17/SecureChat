@@ -51,6 +51,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/users/search', [UserController::class, 'search']);
     Route::put('/user/profile', [UserController::class, 'updateProfile']);
     Route::put('/user/password', [UserController::class, 'updatePassword']);
+    Route::post('/user/heartbeat', [UserController::class, 'heartbeat']);
+    Route::get('/users/online', [UserController::class, 'onlineUsers']);
     Route::get('/users/{user}', [UserController::class, 'show']);
 
     // Conversations
