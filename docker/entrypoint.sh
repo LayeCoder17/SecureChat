@@ -4,10 +4,8 @@ set -e
 cd /var/www/html
 
 # ============================================================
-# Préparation au premier lancement
+# 1. Préparation .env (1re fois)
 # ============================================================
-
-# .env : si absent, on le crée depuis .env.docker ou .env.example
 if [ ! -f .env ]; then
     if [ -f .env.docker ]; then
         cp .env.docker .env
@@ -18,17 +16,35 @@ if [ ! -f .env ]; then
     fi
 fi
 
-# Génère la clé si vide
+# Génère APP_KEY si absente
 if ! grep -q "APP_KEY=base64:" .env; then
     php artisan key:generate --force
     echo "→ APP_KEY générée"
 fi
 
-# Permissions (au cas où un volume monté est root)
+# ============================================================
+# 2. Permissions
+# ============================================================
 mkdir -p storage/framework/{cache,sessions,views} storage/logs bootstrap/cache
 chmod -R ug+rwx storage bootstrap/cache || true
 
-# Attendre que MySQL soit prêt
+# ============================================================
+# 3. Sync des assets front (public/build) depuis l'image
+#    → garantit que le volume app_public contient la dernière build
+# ============================================================
+if [ -d /opt/public-dist ]; then
+    echo "→ Synchronisation des assets publics"
+    cp -Rn /opt/public-dist/. /var/www/html/public/ 2>/dev/null || true
+    # Force mise à jour du build compilé
+    if [ -d /opt/public-dist/build ]; then
+        rm -rf /var/www/html/public/build
+        cp -R /opt/public-dist/build /var/www/html/public/build
+    fi
+fi
+
+# ============================================================
+# 4. Attente MySQL
+# ============================================================
 if [ -n "$DB_HOST" ]; then
     echo "→ Attente de la base $DB_HOST:$DB_PORT..."
     for i in $(seq 1 30); do
@@ -41,22 +57,30 @@ if [ -n "$DB_HOST" ]; then
 fi
 
 # ============================================================
-# Migrations + seeds (la 1re fois seulement)
+# 5. Migrations
 # ============================================================
 if [ "${RUN_MIGRATIONS:-true}" = "true" ]; then
     echo "→ Exécution des migrations"
     php artisan migrate --force
 fi
 
-if [ "${RUN_SEEDERS:-false}" = "true" ]; then
-    echo "→ Exécution des seeders"
+# ============================================================
+# 6. Seeds conditionnels (si users vide = 1re installation)
+# ============================================================
+USER_COUNT=$(php artisan tinker --execute="echo \App\Models\User::count();" 2>/dev/null | tail -1 | tr -d '[:space:]')
+if [ "${USER_COUNT:-0}" = "0" ] || [ "${RUN_SEEDERS:-auto}" = "true" ]; then
+    echo "→ Base vide → exécution des seeders"
     php artisan db:seed --force || true
+else
+    echo "→ $USER_COUNT utilisateurs présents → seeders ignorés"
 fi
 
 # Storage link
 php artisan storage:link 2>/dev/null || true
 
-# Cache config/routes/views (prod uniquement)
+# ============================================================
+# 7. Cache (prod) / Clear (dev)
+# ============================================================
 if [ "${APP_ENV}" = "production" ]; then
     php artisan config:cache
     php artisan route:cache
