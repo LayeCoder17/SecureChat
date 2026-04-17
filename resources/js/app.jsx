@@ -5,6 +5,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Chat from './pages/Chat';
+import Admin from './pages/Admin';
 import { ThemeProvider } from './theme';
 
 function App() {
@@ -14,6 +15,7 @@ function App() {
         <Routes>
             <Route path="/login" element={token ? <Navigate to="/" /> : <Login />} />
             <Route path="/register" element={token ? <Navigate to="/" /> : <Register />} />
+            <Route path="/admin" element={token ? <Admin /> : <Navigate to="/login" />} />
             <Route path="/*" element={token ? <Chat /> : <Navigate to="/login" />} />
         </Routes>
     );
