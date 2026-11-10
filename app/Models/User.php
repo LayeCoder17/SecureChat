@@ -64,6 +64,7 @@ class User extends Authenticatable
                     $q->where('department_id', $this->department_id)
                         ->orWhere('role', 'pdg')
                         ->orWhere('role', 'directeur')
+                        ->when($this->department->parent_id, fn ($q, $parentId) => $q->orWhere('department_id', $parentId))
                         ->orWhereIn('department_id', $this->department->canCommunicateWith()->pluck('departments.id'));
                 });
         }
@@ -75,5 +76,24 @@ class User extends Authenticatable
 
         return User::where('id', '!=', $this->id)
             ->where('department_id', $this->department_id);
+    }
+
+    /**
+     * Vrai si ce compte peut voir le profil de $other : la hiérarchie l'autorise,
+     * ou bien les deux comptes partagent déjà une conversation.
+     */
+    public function canSee(User $other): bool
+    {
+        if ($other->id === $this->id) {
+            return true;
+        }
+
+        if ($this->canCommunicateWith()->whereKey($other->id)->exists()) {
+            return true;
+        }
+
+        return $this->conversations()
+            ->whereHas('users', fn ($q) => $q->where('users.id', $other->id))
+            ->exists();
     }
 }

@@ -78,6 +78,10 @@ class MessageController extends Controller
 
     public function markAsRead(Request $request, Message $message)
     {
+        if (!$message->conversation->hasMember($request->user())) {
+            return response()->json(['message' => 'Accès refusé'], 403);
+        }
+
         if ($message->user_id === $request->user()->id) {
             return response()->json(['message' => 'Pas besoin de marquer vos propres messages']);
         }

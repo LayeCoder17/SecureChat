@@ -41,6 +41,16 @@ class ConversationController extends Controller
             'user_ids.*' => 'exists:users,id',
         ]);
 
+        $autorises = $request->user()->canCommunicateWith()
+            ->whereIn('id', $request->user_ids)
+            ->pluck('id');
+
+        if (count(array_diff($request->user_ids, $autorises->all())) > 0) {
+            return response()->json([
+                'message' => 'Vous ne pouvez pas démarrer de conversation avec ces personnes',
+            ], 403);
+        }
+
         if ($request->type === 'private' && count($request->user_ids) === 1) {
             $existing = $request->user()->conversations()
                 ->where('type', 'private')

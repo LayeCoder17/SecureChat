@@ -18,6 +18,8 @@ class Message extends Model
         'is_read' => 'boolean',
         'read_at' => 'datetime',
         'edited_at' => 'datetime',
+        // Chiffré au repos avec la clé APP_KEY (AES-256-CBC, signé par HMAC)
+        'encrypted_content' => 'encrypted',
     ];
 
     public function user()

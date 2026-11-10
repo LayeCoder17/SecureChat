@@ -34,8 +34,12 @@ class AttachmentController extends Controller
         return response()->json($attachment, 201);
     }
 
-    public function download(Attachment $attachment)
+    public function download(Request $request, Attachment $attachment)
     {
+        if (!$attachment->message->conversation->hasMember($request->user())) {
+            return response()->json(['message' => 'Accès refusé'], 403);
+        }
+
         return Storage::disk('local')->download(
             $attachment->file_path,
             $attachment->file_name

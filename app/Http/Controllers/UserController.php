@@ -18,10 +18,17 @@ class UserController extends Controller
         $user = $request->user();
         $query = $user->canCommunicateWith();
 
-        $results = $query->where(function ($q) use ($request) {
-            $q->where('name', 'ilike', '%' . $request->q . '%')
-                ->orWhere('email', 'ilike', '%' . $request->q . '%')
-                ->orWhere('poste', 'ilike', '%' . $request->q . '%');
+        // LOWER(...) LIKE fonctionne sur SQLite, MySQL et PostgreSQL ;
+        // « ilike » n'existe que sur PostgreSQL. Les jokers % et _ saisis
+        // par l'utilisateur sont échappés (avec « ! », lu de la même façon
+        // par toutes ces bases) pour être cherchés tels quels.
+        $echappe = str_replace(['!', '%', '_'], ['!!', '!%', '!_'], mb_strtolower($request->q));
+        $motif = '%' . $echappe . '%';
+
+        $results = $query->where(function ($q) use ($motif) {
+            foreach (['name', 'email', 'poste'] as $colonne) {
+                $q->orWhereRaw("LOWER({$colonne}) LIKE ? ESCAPE '!'", [$motif]);
+            }
         })
             ->limit(20)
             ->get(['id', 'name', 'email', 'avatar', 'status', 'last_seen_at', 'department_id', 'role', 'poste']);
@@ -74,8 +81,12 @@ class UserController extends Controller
         return response()->json(['message' => 'Mot de passe mis à jour']);
     }
 
-    public function show(User $user)
+    public function show(Request $request, User $user)
     {
+        if (!$request->user()->canSee($user)) {
+            return response()->json(['message' => 'Accès refusé'], 403);
+        }
+
         return response()->json($user->load('department')->only([
             'id', 'name', 'email', 'avatar', 'status', 'last_seen_at', 'department_id', 'role', 'poste', 'department',
         ]));

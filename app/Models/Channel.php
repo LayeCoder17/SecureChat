@@ -18,6 +18,11 @@ class Channel extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
+    public function hasMember(User $user): bool
+    {
+        return $this->members()->where('users.id', $user->id)->exists();
+    }
+
     public function members()
     {
         return $this->belongsToMany(User::class, 'channel_members')

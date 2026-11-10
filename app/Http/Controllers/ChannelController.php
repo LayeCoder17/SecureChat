@@ -40,8 +40,12 @@ class ChannelController extends Controller
         return response()->json($channel->load('members'), 201);
     }
 
-    public function show(Channel $channel)
+    public function show(Request $request, Channel $channel)
     {
+        if ($channel->type === 'private' && !$channel->hasMember($request->user())) {
+            return response()->json(['message' => 'Accès refusé'], 403);
+        }
+
         return response()->json($channel->load(['creator', 'members']));
     }
 

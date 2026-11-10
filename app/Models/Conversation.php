@@ -24,6 +24,11 @@ class Conversation extends Model
         return $this->hasMany(Message::class);
     }
 
+    public function hasMember(User $user): bool
+    {
+        return $this->users()->where('users.id', $user->id)->exists();
+    }
+
     public function lastMessage()
     {
         return $this->hasOne(Message::class)->latestOfMany();

@@ -25,22 +25,23 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Broadcasting auth
     Route::post('/broadcasting/auth', function (Request $request) {
+        $channelName = $request->input('channel_name');
+        $socketId = $request->input('socket_id');
+
+        // Seuls les canaux de conversation existent ; tout autre nom est refusé.
+        if (!preg_match('/^private-conversation\.(\d+)$/', (string) $channelName, $m)) {
+            abort(403);
+        }
+        if (!$request->user()->conversations()->where('conversations.id', $m[1])->exists()) {
+            abort(403);
+        }
+
         $pusher = new \Pusher\Pusher(
             config('broadcasting.connections.pusher.key'),
             config('broadcasting.connections.pusher.secret'),
             config('broadcasting.connections.pusher.app_id'),
             config('broadcasting.connections.pusher.options') ?? []
         );
-
-        $channelName = $request->input('channel_name');
-        $socketId = $request->input('socket_id');
-
-        if (str_starts_with($channelName, 'private-conversation.')) {
-            $conversationId = str_replace('private-conversation.', '', $channelName);
-            if (!$request->user()->conversations()->where('conversations.id', $conversationId)->exists()) {
-                abort(403);
-            }
-        }
 
         $auth = $pusher->authorizeChannel($channelName, $socketId);
         return response()->json(json_decode($auth));
