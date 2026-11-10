@@ -12,6 +12,9 @@ services:
       APP_ENV: local
       APP_DEBUG: "true"
       APP_URL: http://localhost:8000
+      # La clé chiffre les messages : elle doit rester la même d'un
+      # démarrage à l'autre, sinon les messages déjà stockés deviennent illisibles.
+      APP_KEY: ${APP_KEY:?Définissez APP_KEY dans le fichier .env (voir le README)}
       DB_CONNECTION: mysql
       DB_HOST: db
       DB_PORT: 3306
@@ -25,7 +28,8 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - .:/var/www/html
+      # Les pièces jointes et avatars survivent aux redémarrages.
+      - fichiers:/var/www/html/storage/app
 
   db:
     image: mysql:8.0
@@ -47,3 +51,4 @@ services:
 
 volumes:
   mysql_data:
+  fichiers:

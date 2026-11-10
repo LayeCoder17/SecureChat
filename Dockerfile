@@ -9,9 +9,10 @@ RUN npm run build
 FROM composer:2.8 AS vendor-builder
 WORKDIR /app
 COPY composer.json composer.lock ./
-RUN composer install --no-dev --prefer-dist --no-interaction --no-progress --optimize-autoloader
+# Les scripts Laravel ont besoin du code (artisan) : ils tournent plus bas.
+RUN composer install --no-dev --prefer-dist --no-interaction --no-progress --optimize-autoloader --no-scripts
 
-FROM php:8.3-cli-alpine
+FROM php:8.4-cli-alpine
 WORKDIR /var/www/html
 
 RUN apk add --no-cache \
@@ -29,9 +30,10 @@ COPY --from=vendor-builder /app/vendor ./vendor
 COPY . .
 COPY --from=frontend-builder /app/public/build ./public/build
 
-RUN cp .env.example .env \
-    && php artisan key:generate --force \
-    && php artisan storage:link || true
+# Pas de fichier .env dans l'image : toute la configuration (dont APP_KEY)
+# vient des variables d'environnement définies par docker-compose.
+RUN php artisan package:discover --ansi \
+    && (php artisan storage:link || true)
 
 EXPOSE 8000
 
